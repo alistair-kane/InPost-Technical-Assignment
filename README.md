@@ -49,4 +49,4 @@ source .venv/bin/activate
 python scripts/fetch_place_ids.py --sample-size 5
 ```
 
-Documents are upserted into the collection named by **`DEFAULT_MONGO_COLLECTION`** (`google_place_id` is only set when validation status is `OK`). Stored fields include `search_strategy`, `distance_to_google_place_m` (for nearby), and Nearby or Geocode status fields.
+Documents are upserted into the collection named by **`DEFAULT_MONGO_COLLECTION`** (`google_place_id` is only set when validation status is `OK`). When Place Details succeeds, the document includes **`google_reviews`**: a list of normalized review objects from the [`reviews` field](https://developers.google.com/maps/documentation/places/web-service/details) (Atmosphere SKU billing). Other stored fields include `search_strategy`, `distance_to_google_place_m` (for nearby), and status fields.

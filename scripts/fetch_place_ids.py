@@ -170,7 +170,7 @@ def google_place_details(session: requests.Session, api_key: str, place_id: str)
         PLACE_DETAILS_URL,
         params={
             "place_id": place_id,
-            "fields": "name,place_id,url",
+            "fields": "name,place_id,url,reviews",
             "key": api_key,
         },
         timeout=30,
@@ -287,6 +287,7 @@ def _common_base(item: dict[str, Any]) -> tuple[dict[str, Any], Any, Any, str, s
         "google_place_id": None,
         "google_place_name": None,
         "google_maps_uri": None,
+        "google_reviews": None,
         "formatted_address": None,
         "distance_to_google_place_m": None,
         "candidate_place_id": None,
@@ -368,7 +369,7 @@ def process_item_nearby(
     time.sleep(max(0.0, cfg.request_delay))
     if details.get("status") == "OK":
         res = details.get("result") or {}
-        base["google_maps_uri"] = _extract_google_maps_uri(res)
+        _apply_place_details_to_doc(base, res)
     return base
 
 
@@ -385,6 +386,46 @@ def _extract_google_maps_uri(place_result: dict[str, Any]) -> Optional[str]:
         return None
     s = str(raw).strip()
     return s or None
+
+
+def _normalize_google_reviews(place_result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Map Place Details `reviews` to BSON-friendly dicts (see Places Web Service reviews field)."""
+    raw = place_result.get("reviews")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for rev in raw:
+        if not isinstance(rev, dict):
+            continue
+        entry: dict[str, Any] = {}
+        if rev.get("author_name") is not None:
+            entry["author_name"] = rev.get("author_name")
+        if rev.get("author_url") is not None:
+            entry["author_url"] = rev.get("author_url")
+        if rev.get("language") is not None:
+            entry["language"] = rev.get("language")
+        if rev.get("original_language") is not None:
+            entry["original_language"] = rev.get("original_language")
+        if rev.get("profile_photo_url") is not None:
+            entry["profile_photo_url"] = rev.get("profile_photo_url")
+        if rev.get("rating") is not None:
+            entry["rating"] = rev.get("rating")
+        if rev.get("relative_time_description") is not None:
+            entry["relative_time_description"] = rev.get("relative_time_description")
+        if rev.get("text") is not None:
+            entry["text"] = rev.get("text")
+        if rev.get("time") is not None:
+            entry["time_unix"] = rev.get("time")
+        if rev.get("translated") is not None:
+            entry["translated"] = rev.get("translated")
+        if entry:
+            out.append(entry)
+    return out
+
+
+def _apply_place_details_to_doc(base: dict[str, Any], place_result: dict[str, Any]) -> None:
+    base["google_maps_uri"] = _extract_google_maps_uri(place_result)
+    base["google_reviews"] = _normalize_google_reviews(place_result)
 
 
 def process_item_geocode(
@@ -433,7 +474,7 @@ def process_item_geocode(
 
     base["google_place_name"] = pname or None
     if d_status == "OK":
-        base["google_maps_uri"] = _extract_google_maps_uri(result)
+        _apply_place_details_to_doc(base, result)
 
     if d_status != "OK":
         base["validation_status"] = "PLACE_DETAILS_FAILED"
