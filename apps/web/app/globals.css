@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  /* Default Tailwind `text-xs` can read small on dense UI; enforce 12px minimum. */
+  --text-xs: 12px;
+  --text-xs--line-height: 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Double-ended rating range: thumbs receive clicks; rails do not overlap. */
+.dual-rating-range input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+  margin: 0;
+  width: 100%;
+}
+
+.dual-rating-range input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: transparent;
+}
+
+.dual-rating-range input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: transparent;
+}
+
+.dual-rating-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  border: 2px solid rgb(38 38 38);
+  background: rgb(251 191 36);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  cursor: grab;
+}
+
+.dual-rating-range input[type="range"]:active::-webkit-slider-thumb {
+  cursor: grabbing;
+}
+
+.dual-rating-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  border-radius: 9999px;
+  border: 2px solid rgb(38 38 38);
+  background: rgb(251 191 36);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  cursor: grab;
+}
+
+.dual-rating-range input[type="range"]:active::-moz-range-thumb {
+  cursor: grabbing;
+}
+
+.dual-rating-range:focus-within input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid rgb(251 191 36 / 0.6);
+  outline-offset: 2px;
+}
+
+.dual-rating-range:focus-within input[type="range"]:focus-visible::-moz-range-thumb {
+  outline: 2px solid rgb(251 191 36 / 0.6);
+  outline-offset: 2px;
+}

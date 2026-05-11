@@ -2,6 +2,56 @@
 
 Connecting InPost's service point data with Google Places for their locations.
 
+## Map dashboard (Next.js + FastAPI)
+
+The **`apps/web`** Next.js app shows locker locations from MongoDB on **Google Maps** (centered on Poland) with **`@googlemaps/markerclusterer`**. **`apps/api`** is a FastAPI service that exposes **`GET /points`** secured with **`X-Api-Key`**. The browser never sees that secret: the UI calls **`GET /api/map-points`**, which the Next.js server proxies to FastAPI using **`MAP_DASHBOARD_API_SECRET`**.
+
+### Dashboard prerequisites
+
+- Docker and Docker Compose
+- Variables in `.env` (copy from [.env.example](.env.example)):
+  - **`MAP_DASHBOARD_API_SECRET`** (long random string, shared between `api` and `web`)
+  - **`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`** ([Maps JavaScript API](https://developers.google.com/maps/documentation/javascript/overview) enabled; restrict HTTP referrers to `http://localhost:3000` and your eventual HTTPS origins)
+  - **`NEXT_PUBLIC_GOOGLE_MAP_ID`** (a [vector Map ID](https://developers.google.com/maps/documentation/javascript/advanced-markers/setup) from Cloud Console Map Management — required so the app uses **AdvancedMarkerElement**, not deprecated `google.maps.Marker`)
+  - Optionally reuse **`GOOGLE_MAPS_API_KEY`** from ingest for the same GCP key if referrer rules permit
+
+### Run the full stack locally
+
+From the repo root:
+
+```bash
+docker compose up --build
+```
+
+Open **`http://localhost:3000`**. The API lives at **`http://localhost:8000`** (for example **`GET /health`** and **`GET /health/ready`**).
+
+`GET /points` requires header **`X-Api-Key: <MAP_DASHBOARD_API_SECRET>`** and omits MongoDB rows with **`validation_status: SKIPPED_BAD_COORDINATES`**; coordinates must fall within sane lat/lng ranges.
+
+### Local development without rebuilding `web`
+
+With Mongo + API in Docker (or API run locally with `uvicorn`):
+
+```bash
+cd apps/web
+export FASTAPI_URL=http://localhost:8000
+export MAP_DASHBOARD_API_SECRET=…   # same value as the API service
+export NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=…
+export NEXT_PUBLIC_GOOGLE_MAP_ID=…  # vector map ID from Google Cloud Console
+npm run dev
+```
+
+### Production-oriented Compose
+
+[**docker-compose.prod.yml**](docker-compose.prod.yml) stops publishing **`mongo` port** `27017` to the host. Use it alongside the base file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+Before production, set **`CORS_ORIGINS`** to your HTTPS Next.js origin(s), terminate TLS at your reverse proxy, and rotate **`MAP_DASHBOARD_API_SECRET`**. Keep MongoDB reachable only inside the Compose network unless you deliberately use Atlas or another hosted database.
+
+---
+
 ## InPost sample to Google Place ID (MongoDB)
 
 The script walks the [InPost global points API](https://api-global-points.easypack24.net/v1/points) until it collects up to your target count of lockers that **do not yet** have a `google_place_id` stored in MongoDB (already-resolved lockers are skipped so Google APIs are not called again). It writes one upsert per processed locker.

@@ -220,3 +220,6 @@ __marimo__/
 .cursor/
 # Python virtual environment
 .pyvenv.cfg
+
+node_modules/
+**/.next/

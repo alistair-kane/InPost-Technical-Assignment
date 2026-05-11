@@ -8,7 +8,7 @@ from constants import DEFAULT_COUNTRY_CODE, INPOST_NAME_SUBSTRING
 from google_places_client import GooglePlacesClient
 from inpost_client import InpostClient
 from point_repository import PointRepository
-from point_utils import distance_m, inpost_point_id_from_item
+from point_utils import distance_m, inpost_point_id_from_item, map_eligible_for_document
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +105,11 @@ class PointResolutionService:
         country = raw_c or (DEFAULT_COUNTRY_CODE or "").strip()
         code = item.get("name") or ""
         inpost_point_id = inpost_point_id_from_item(item)
+        partner_id = item.get("partner_id")
         now = datetime.now(timezone.utc)
         base: dict[str, Any] = {
             "inpost_point_id": inpost_point_id,
+            "partner_id": partner_id,
             "country": country,
             "name": code,
             "latitude": lat,
@@ -119,6 +121,8 @@ class PointResolutionService:
             "google_place_id": None,
             "google_place_name": None,
             "google_maps_uri": None,
+            "google_rating": None,
+            "google_user_ratings_total": None,
             "google_reviews": None,
             "formatted_address": None,
             "distance_to_google_place_m": None,
@@ -137,6 +141,7 @@ class PointResolutionService:
         base["nearby_keyword"] = self.keyword
         if self._bad_coordinates(lat, lng):
             base["validation_status"] = "SKIPPED_BAD_COORDINATES"
+            base["map_eligible"] = map_eligible_for_document(base)
             return base
         composed_address = self._build_geocode_query(item)
         base["formatted_address"] = self._optional_trimmed_str(composed_address)
@@ -152,10 +157,12 @@ class PointResolutionService:
         base["nearby_results_total"] = len(raw_results)
         if status not in ("OK", "ZERO_RESULTS"):
             base["validation_status"] = "NEARBY_FAILED"
+            base["map_eligible"] = map_eligible_for_document(base)
             return base
         chosen = self._pick_closest_inpost_place(raw_results, lat_f, lng_f)
         if chosen is None:
             base["validation_status"] = "NO_INPOST_IN_RADIUS"
+            base["map_eligible"] = map_eligible_for_document(base)
             return base
         pname = (chosen.get("name") or "").strip()
         pid = chosen.get("place_id")
@@ -163,6 +170,7 @@ class PointResolutionService:
         base["candidate_place_id"] = pid
         if not pid:
             base["validation_status"] = "NEARBY_MISSING_PLACE_ID"
+            base["map_eligible"] = map_eligible_for_document(base)
             return base
         geom = chosen.get("geometry") or {}
         loc = geom.get("location") or {}
@@ -176,6 +184,7 @@ class PointResolutionService:
         base["inpost_name_match"] = True
         base["validation_status"] = "OK"
         self.places_client.enrich_place_details(pid, base)
+        base["map_eligible"] = map_eligible_for_document(base)
         return base
 
     def run(self, sample_size: int) -> None:

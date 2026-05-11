@@ -31,15 +31,18 @@ class GooglePlacesClient:
             return "en"
         return cc.lower()
 
+    _PLACE_DETAILS_FULL_FIELDS = "name,place_id,url,reviews,rating,user_ratings_total"
+
     def place_details(
         self,
         place_id: str,
         *,
+        fields: Optional[str] = None,
         reviews_no_translations: Optional[bool] = None,
     ) -> dict[str, Any]:
         params: dict[str, str] = {
             "place_id": place_id,
-            "fields": "name,place_id,url,reviews",
+            "fields": fields or self._PLACE_DETAILS_FULL_FIELDS,
             "key": self.api_key,
             "language": self.language,
         }
@@ -122,6 +125,26 @@ class GooglePlacesClient:
         return s or None
 
     @staticmethod
+    def _extract_place_aggregate_rating(
+        place_result: dict[str, Any],
+    ) -> tuple[Optional[float], Optional[int]]:
+        rating_raw = place_result.get("rating")
+        total_raw = place_result.get("user_ratings_total")
+        rating: Optional[float] = None
+        total: Optional[int] = None
+        if rating_raw is not None:
+            try:
+                rating = float(rating_raw)
+            except (TypeError, ValueError):
+                rating = None
+        if total_raw is not None:
+            try:
+                total = int(total_raw)
+            except (TypeError, ValueError):
+                total = None
+        return rating, total
+
+    @staticmethod
     def _review_merge_key(rev: dict[str, Any]) -> tuple[Any, Any]:
         return (rev.get("time"), rev.get("author_url"))
 
@@ -183,6 +206,9 @@ class GooglePlacesClient:
         reviews_original_language: Optional[list[Any]] = None,
     ) -> None:
         base["google_maps_uri"] = cls._extract_google_maps_uri(place_result)
+        gr, gut = cls._extract_place_aggregate_rating(place_result)
+        base["google_rating"] = gr
+        base["google_user_ratings_total"] = gut
         base["google_reviews"] = cls._normalize_google_reviews(
             place_result,
             reviews_original_language=reviews_original_language,
