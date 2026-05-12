@@ -1,29 +1,25 @@
 "use client";
 
-import {
-  SPOTLIGHT_ICON_SRC,
-  SPOTLIGHT_PRESET_LABELS,
-  SPOTLIGHT_PRESET_ORDER,
-  type SpotlightPresetId,
-} from "@/lib/mapSpotlightPresets";
 import { markerSvgSrc } from "@/lib/markerSvgSrc";
 
 import {
+  areMapFiltersActive,
+  formatReviewTimeFilterSummary,
   RATING_SLIDER_MAX,
   RATING_SLIDER_MIN,
   RATING_SLIDER_STEP,
+  REVIEW_TIME_KNOT_LABELS,
+  REVIEW_TIME_MAX_KNOT_INDEX,
   type MapFiltersForm,
 } from "./mapFiltersQuery";
 
 type MapFiltersPanelProps = {
   form: MapFiltersForm;
   onFormChange: (patch: Partial<MapFiltersForm>) => void;
+  onResetFilters: () => void;
   partnerOptions: number[];
   selectedPartners: Set<number>;
   onPartnerToggle: (id: number) => void;
-  spotlightActive: SpotlightPresetId | null;
-  onSpotlightSelect: (id: SpotlightPresetId) => void;
-  spotlightPoolEmpty: boolean;
 };
 
 function pctAlong(v: number, min: number, max: number): number {
@@ -33,15 +29,20 @@ function pctAlong(v: number, min: number, max: number): number {
   return ((v - min) / (max - min)) * 100;
 }
 
+function clampReviewKnotIdx(n: number): number {
+  return Math.max(
+    0,
+    Math.min(REVIEW_TIME_MAX_KNOT_INDEX, Math.round(Number(n)))
+  );
+}
+
 export function MapFiltersPanel({
   form,
   onFormChange,
+  onResetFilters,
   partnerOptions,
   selectedPartners,
   onPartnerToggle,
-  spotlightActive,
-  onSpotlightSelect,
-  spotlightPoolEmpty,
 }: MapFiltersPanelProps) {
   const minLabel = form.minRating.toFixed(1);
   const maxLabel = form.maxRating.toFixed(1);
@@ -54,6 +55,27 @@ export function MapFiltersPanel({
     form.maxRating === RATING_SLIDER_MAX
       ? "Any rating"
       : `${minLabel} – ${maxLabel} ★`;
+
+  const reviewTimeVisualNewer = REVIEW_TIME_MAX_KNOT_INDEX - form.reviewTimeMaxIdx;
+  const reviewTimeVisualOlder = REVIEW_TIME_MAX_KNOT_INDEX - form.reviewTimeMinIdx;
+  const reviewTimeLeftPct = pctAlong(
+    reviewTimeVisualNewer,
+    0,
+    REVIEW_TIME_MAX_KNOT_INDEX
+  );
+  const reviewTimeRightPct = pctAlong(
+    reviewTimeVisualOlder,
+    0,
+    REVIEW_TIME_MAX_KNOT_INDEX
+  );
+  const reviewTimeFillPct = Math.max(0, reviewTimeRightPct - reviewTimeLeftPct);
+  const reviewTimeSummary = formatReviewTimeFilterSummary(form);
+  const reviewTimeKnotLabelsNewestFirst = [...REVIEW_TIME_KNOT_LABELS].reverse();
+  const filtersActive = areMapFiltersActive(
+    form,
+    partnerOptions,
+    selectedPartners
+  );
 
   return (
     <div className="w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-white/15 bg-neutral-950/95 text-neutral-100 shadow-xl backdrop-blur">
@@ -167,6 +189,70 @@ export function MapFiltersPanel({
             </div>
           </fieldset>
 
+          <fieldset className="mt-5">
+            <legend className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+              Review time
+            </legend>
+            <p className="mb-3 text-neutral-400" aria-live="polite">
+              <span className="tabular-nums text-neutral-200">{reviewTimeSummary}</span>
+            </p>
+            <div className="dual-rating-range relative h-9 w-full pb-4">
+              <div
+                className="pointer-events-none absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-neutral-700"
+                aria-hidden
+              />
+              <div
+                className="pointer-events-none absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-amber-500/85"
+                style={{
+                  left: `${reviewTimeLeftPct}%`,
+                  width: `${reviewTimeFillPct}%`,
+                }}
+                aria-hidden
+              />
+              <div className="pointer-events-none absolute bottom-[-16px] left-0 right-0 flex justify-between px-px text-sm font-medium text-neutral-400">
+                {reviewTimeKnotLabelsNewestFirst.map((label) => (
+                  <span key={label} className="min-w-0 flex-1 text-center">
+                    {label}
+                  </span>
+                ))}
+              </div>
+              <input
+                type="range"
+                aria-label="Newer review time bound"
+                min={0}
+                max={REVIEW_TIME_MAX_KNOT_INDEX}
+                step={1}
+                value={reviewTimeVisualNewer}
+                className="absolute left-0 right-0 top-0 z-[3] h-9 cursor-pointer"
+                onChange={(e) => {
+                  const Lv = clampReviewKnotIdx(Number(e.target.value));
+                  const newMaxIdx = REVIEW_TIME_MAX_KNOT_INDEX - Lv;
+                  onFormChange({
+                    reviewTimeMaxIdx: newMaxIdx,
+                    reviewTimeMinIdx: Math.min(form.reviewTimeMinIdx, newMaxIdx),
+                  });
+                }}
+              />
+              <input
+                type="range"
+                aria-label="Older review time bound"
+                min={0}
+                max={REVIEW_TIME_MAX_KNOT_INDEX}
+                step={1}
+                value={reviewTimeVisualOlder}
+                className="absolute left-0 right-0 top-0 z-[4] h-9 cursor-pointer"
+                onChange={(e) => {
+                  const Rv = clampReviewKnotIdx(Number(e.target.value));
+                  const newMinIdx = REVIEW_TIME_MAX_KNOT_INDEX - Rv;
+                  onFormChange({
+                    reviewTimeMinIdx: newMinIdx,
+                    reviewTimeMaxIdx: Math.max(form.reviewTimeMaxIdx, newMinIdx),
+                  });
+                }}
+              />
+            </div>
+          </fieldset>
+
           <fieldset className="mt-4">
             <legend className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-neutral-500">
               Google Maps Proximity
@@ -186,47 +272,16 @@ export function MapFiltersPanel({
             </label>
           </fieldset>
 
-          <fieldset className="mt-4 border-t border-white/10 pt-3">
-            <legend className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-              Location spotlight
-            </legend>
-            <div className="flex flex-col gap-[9px]">
-              {SPOTLIGHT_PRESET_ORDER.map((id) => {
-                const pressed = spotlightActive === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    disabled={spotlightPoolEmpty}
-                    aria-pressed={pressed}
-                    title={SPOTLIGHT_PRESET_LABELS[id]}
-                    onClick={() => onSpotlightSelect(id)}
-                    className={`flex w-full items-center gap-[9px] rounded-md border px-[9px] py-[9px] text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 ${pressed
-                        ? "border-amber-500/60 bg-amber-950/50 text-amber-100 ring-1 ring-amber-500/35"
-                        : "border-white/12 bg-neutral-900/90 text-neutral-200 hover:border-amber-500/25 hover:bg-neutral-800/90"
-                      }`}
-                  >
-                    <span
-                      className={`shrink-0 ${pressed ? "opacity-100" : "opacity-90"}`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element -- local /public SVG assets */}
-                      <img
-                        src={SPOTLIGHT_ICON_SRC[id]}
-                        alt=""
-                        width={24}
-                        height={24}
-                        draggable={false}
-                        className="pointer-events-none block h-6 w-6 object-contain object-center"
-                      />
-                    </span>
-                    <span className="min-w-0 font-mono text-sm font-medium uppercase leading-snug tracking-tight text-neutral-400">
-                      {SPOTLIGHT_PRESET_LABELS[id]}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
+          <div className="-mx-3 mt-4 border-t border-white/10 px-3 pb-3 pt-3">
+            <button
+              type="button"
+              disabled={!filtersActive}
+              onClick={onResetFilters}
+              className="w-full rounded-md border border-white/15 bg-neutral-800/90 py-2.5 text-sm font-medium text-neutral-200 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 enabled:hover:border-amber-500/35 enabled:hover:bg-neutral-800 disabled:cursor-not-allowed disabled:border-white/10 disabled:opacity-40 disabled:hover:bg-neutral-800/90"
+            >
+              Reset
+            </button>
+          </div>
         </div>
       </details>
     </div>

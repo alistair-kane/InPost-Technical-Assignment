@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-const FORWARD_QUERY_KEYS = ["min_rating", "max_rating"] as const;
+const FORWARD_QUERY_KEYS = [
+  "min_rating",
+  "max_rating",
+  "min_review_time",
+  "max_review_time",
+] as const;
 
 function truthyNoGooglePlaceOnly(v: string | null): boolean {
   if (v == null || v === "") {

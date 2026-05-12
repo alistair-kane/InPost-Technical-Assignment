@@ -35,7 +35,7 @@ class PointResolutionService:
             ln = float(lng)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return True
-        return abs(la) < 1e-9 and abs(ln) < 1e-9
+        return abs(la) <= 1 and abs(ln) <= 1
 
     @staticmethod
     def _optional_trimmed_str(value: Any) -> Optional[str]:

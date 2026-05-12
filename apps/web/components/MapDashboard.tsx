@@ -22,6 +22,7 @@ import {
 import { LocationDetailPanel, type InpostPointItem } from "./LocationDetailPanel";
 import { MasMascot } from "./MasMascot";
 import { MapFiltersPanel } from "./MapFiltersPanel";
+import { MapSpotlightBar } from "./MapSpotlightBar";
 import { markerSvgSrc } from "@/lib/markerSvgSrc";
 import {
   pickSpotlightPoint,
@@ -43,6 +44,9 @@ const mapContainerStyle = { width: "100%", height: "100%" };
 
 const defaultCenter = { lat: 52.1, lng: 19.3 };
 const defaultZoom = 6.5;
+
+/** Min zoom levels above baseline before showing reset (Google Maps zoom increases when zooming in). */
+const MAP_RESET_ZOOM_IN_THRESHOLD = 2;
 
 const MARKER_SIZE_PX = 40;
 const SELECTED_MARKER_Z_INDEX = 5_000_000;
@@ -90,6 +94,7 @@ function countMapPointsInBounds(
 const CLUSTER_ICON_PX = 48;
 const CLUSTER_BG_HEX = "#404041";
 const CLUSTER_TEXT_HEX = "#FFCC04";
+const SUN_RAY_COUNT = 12;
 
 function clusterBubbleDataUrl(count: number): string {
   const label = String(Math.min(99999, Math.max(1, count)));
@@ -127,6 +132,30 @@ function buildClusterBubbleContent(count: number): HTMLElement {
   is.objectFit = "contain";
   wrapper.appendChild(img);
   return wrapper;
+}
+
+function sunMarkerDataUrl(): string {
+  const centerX = MARKER_SIZE_PX / 2;
+  // Keep the sun lower so AdvancedMarker bottom-center anchoring
+  // aligns the visible sun center with the selected point.
+  const centerY = MARKER_SIZE_PX - 24;
+  const innerR = 6;
+  const rayInnerR = 9;
+  const rayOuterR = 13;
+  const rays = Array.from({ length: SUN_RAY_COUNT }, (_, i) => {
+    const theta = (Math.PI * 2 * i) / SUN_RAY_COUNT;
+    const x1 = centerX + rayInnerR * Math.cos(theta);
+    const y1 = centerY + rayInnerR * Math.sin(theta);
+    const x2 = centerX + rayOuterR * Math.cos(theta);
+    const y2 = centerY + rayOuterR * Math.sin(theta);
+    return `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`;
+  }).join("");
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${MARKER_SIZE_PX}" height="${MARKER_SIZE_PX}" viewBox="0 0 ${MARKER_SIZE_PX} ${MARKER_SIZE_PX}">` +
+    `<g stroke="#FFCC04" stroke-width="2.4" stroke-linecap="round">${rays}</g>` +
+    `<circle cx="${centerX}" cy="${centerY}" r="${innerR}" fill="#FFCC04" stroke="#2D2D2D" stroke-width="2"/>` +
+    `</svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 const inPostClusterRenderer: Renderer = {
@@ -169,6 +198,7 @@ function buildSvgMarkerContent(
   const s = wrapper.style;
   s.width = `${MARKER_SIZE_PX}px`;
   s.height = `${MARKER_SIZE_PX}px`;
+  s.position = "relative";
   s.display = "flex";
   s.flexDirection = "column";
   s.alignItems = "center";
@@ -176,10 +206,8 @@ function buildSvgMarkerContent(
   s.pointerEvents = "auto";
   s.lineHeight = "0";
   if (selected) {
-    s.borderRadius = "8px";
-    s.backgroundColor = "rgba(255, 204, 4, 0.14)";
-    s.boxShadow =
-      "0 0 0 12px #FFCC04, 0 0 10px rgba(255, 204, 4, 0.55), 0 4px 20px rgba(0,0,0,0.35)";
+    s.borderRadius = "999px";
+    s.backgroundColor = "rgba(255, 204, 4, 0.08)";
   }
 
   const img = document.createElement("img");
@@ -195,9 +223,29 @@ function buildSvgMarkerContent(
   is.objectFit = "contain";
   is.objectPosition = "bottom center";
   is.filter = selected
-    ? "drop-shadow(0 2px 3px rgba(0,0,0,0.45)) drop-shadow(0 0 8px rgba(255,204,4,0.65))"
+    ? "drop-shadow(0 2px 4px rgba(0,0,0,0.35)) drop-shadow(0 0 9px rgba(255,204,4,0.72))"
     : "drop-shadow(0 2px 3px rgba(0,0,0,0.35))";
   wrapper.appendChild(img);
+  if (selected) {
+    const sun = document.createElement("img");
+    sun.src = sunMarkerDataUrl();
+    sun.width = MARKER_SIZE_PX;
+    sun.height = MARKER_SIZE_PX;
+    sun.alt = "";
+    sun.draggable = false;
+    const ss = sun.style;
+    ss.position = "absolute";
+    ss.left = "0";
+    ss.top = "0";
+    ss.width = `${MARKER_SIZE_PX}px`;
+    ss.height = `${MARKER_SIZE_PX}px`;
+    ss.objectFit = "contain";
+    ss.objectPosition = "bottom center";
+    ss.pointerEvents = "none";
+    ss.zIndex = "2";
+    ss.filter = "drop-shadow(0 0 9px rgba(255,204,4,0.72))";
+    wrapper.appendChild(sun);
+  }
   return wrapper;
 }
 
@@ -342,13 +390,29 @@ export default function MapDashboard() {
   const [filterForm, setFilterForm] = useState<MapFiltersForm>(emptyMapFiltersForm);
   const debouncedMinRating = useDebouncedValue(filterForm.minRating, 260);
   const debouncedMaxRating = useDebouncedValue(filterForm.maxRating, 260);
+  const debouncedReviewTimeMinIdx = useDebouncedValue(
+    filterForm.reviewTimeMinIdx,
+    260
+  );
+  const debouncedReviewTimeMaxIdx = useDebouncedValue(
+    filterForm.reviewTimeMaxIdx,
+    260
+  );
   const queryFilterForm = useMemo(
     (): MapFiltersForm => ({
       minRating: debouncedMinRating,
       maxRating: debouncedMaxRating,
       onlyWithoutGooglePlace: filterForm.onlyWithoutGooglePlace,
+      reviewTimeMinIdx: debouncedReviewTimeMinIdx,
+      reviewTimeMaxIdx: debouncedReviewTimeMaxIdx,
     }),
-    [debouncedMinRating, debouncedMaxRating, filterForm.onlyWithoutGooglePlace]
+    [
+      debouncedMinRating,
+      debouncedMaxRating,
+      debouncedReviewTimeMinIdx,
+      debouncedReviewTimeMaxIdx,
+      filterForm.onlyWithoutGooglePlace,
+    ]
   );
   const [partnerOptions, setPartnerOptions] = useState<number[]>([]);
   const [selectedPartners, setSelectedPartners] = useState<Set<number>>(
@@ -359,6 +423,10 @@ export default function MapDashboard() {
   const [inpostLoading, setInpostLoading] = useState(false);
   const [inpostError, setInpostError] = useState<string | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
+  const [mapDarkMode, setMapDarkMode] = useState(false);
+  /** Camera passed into `GoogleMap` when basemap remounts (colorScheme only applies at init). */
+  const [mapBootCenter, setMapBootCenter] = useState(defaultCenter);
+  const [mapBootZoom, setMapBootZoom] = useState(defaultZoom);
   const [markerLibReady, setMarkerLibReady] = useState(false);
   const clustererRef = useRef<MarkerClusterer | null>(null);
   const mapTypeBarCleanupRef = useRef<(() => void) | null>(null);
@@ -372,6 +440,13 @@ export default function MapDashboard() {
   const spotlightToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  /** First stable camera after each map mount (initial view for that instance). */
+  const mapCameraBaselineRef = useRef<{
+    lat: number;
+    lng: number;
+    zoom: number;
+  } | null>(null);
+  const [showResetMapView, setShowResetMapView] = useState(false);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAP_ID ?? "";
@@ -688,6 +763,68 @@ export default function MapDashboard() {
     setMap(null);
   }, []);
 
+  const snapshotMapCameraForRemount = useCallback(() => {
+    if (!map) {
+      return;
+    }
+    const c = map.getCenter();
+    const z = map.getZoom();
+    if (c) {
+      const lat = c.lat();
+      const lng = c.lng();
+      const zoom = z ?? defaultZoom;
+      setMapBootCenter({ lat, lng });
+      setMapBootZoom(zoom);
+    }
+  }, [map]);
+
+  const handleResetMapView = useCallback(() => {
+    if (!map) {
+      return;
+    }
+    const b = mapCameraBaselineRef.current;
+    if (!b) {
+      return;
+    }
+    map.panTo({ lat: b.lat, lng: b.lng });
+    map.setZoom(b.zoom);
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) {
+      mapCameraBaselineRef.current = null;
+      setShowResetMapView(false);
+      return;
+    }
+    mapCameraBaselineRef.current = null;
+
+    const onIdle = () => {
+      const c = map.getCenter();
+      const z = map.getZoom();
+      if (!c || z == null) {
+        return;
+      }
+      if (mapCameraBaselineRef.current === null) {
+        mapCameraBaselineRef.current = {
+          lat: c.lat(),
+          lng: c.lng(),
+          zoom: z,
+        };
+        setShowResetMapView(false);
+        return;
+      }
+      const base = mapCameraBaselineRef.current;
+      setShowResetMapView(
+        z >= base.zoom + MAP_RESET_ZOOM_IN_THRESHOLD - 1e-6
+      );
+    };
+
+    const idleListener = map.addListener("idle", onIdle);
+    return () => {
+      google.maps.event.removeListener(idleListener);
+    };
+  }, [map]);
+
   const markersData = useMemo(() => points ?? [], [points]);
 
   useEffect(() => {
@@ -819,33 +956,90 @@ export default function MapDashboard() {
         <MasMascot size={48} />
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-semibold tracking-tight">
-            InPost 
+            InPost Poland - Google Maps Data Explorer
           </h1>
           <p className="text-md text-neutral-400">{headerCountSubtitle}</p>
         </div>
+        <div className="ml-auto shrink-0 origin-top-right scale-[1.3]">
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-white/15 bg-neutral-900/85 p-0.5 shadow-sm"
+            role="group"
+            aria-label="Map appearance"
+          >
+            <button
+              type="button"
+              aria-label="Light map"
+              aria-pressed={!mapDarkMode}
+              onClick={() => {
+                snapshotMapCameraForRemount();
+                setMapDarkMode(false);
+              }}
+              className={`rounded-md px-2 py-1.5 transition-colors ${
+                !mapDarkMode
+                  ? "bg-white ring-2 ring-amber-400 shadow-sm"
+                  : "bg-white/90 ring-1 ring-black/10 hover:bg-white"
+              }`}
+            >
+              <img
+                src="/map-theme-light.svg"
+                width={22}
+                height={22}
+                alt=""
+                draggable={false}
+              />
+            </button>
+            <button
+              type="button"
+              aria-label="Dark map"
+              aria-pressed={mapDarkMode}
+              onClick={() => {
+                snapshotMapCameraForRemount();
+                setMapDarkMode(true);
+              }}
+              className={`rounded-md px-2 py-1.5 transition-colors ${
+                mapDarkMode
+                  ? "bg-amber-400/20 ring-1 ring-amber-400/45"
+                  : "hover:bg-white/5"
+              }`}
+            >
+              <img
+                src="/map-theme-dark.svg"
+                width={22}
+                height={22}
+                alt=""
+                draggable={false}
+              />
+            </button>
+          </div>
+        </div>
       </header>
+      {showResetMapView && (
+        <div className="pointer-events-none absolute left-1/2 top-[5.25rem] z-[21] flex -translate-x-1/2 justify-center px-3">
+          <button
+            type="button"
+            onClick={handleResetMapView}
+            aria-label="Reset map zoom and position to initial view"
+            className="pointer-events-auto rounded-md border border-white/15 bg-neutral-950/90 px-3 py-2 text-sm font-medium text-neutral-100 shadow-lg backdrop-blur transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 hover:border-amber-500/35 hover:bg-neutral-900/95"
+          >
+            Reset view
+          </button>
+        </div>
+      )}
       <div className="absolute right-4 top-20 z-20 max-w-[calc(100vw-1rem)]">
         <MapFiltersPanel
           form={filterForm}
           onFormChange={(patch) =>
             setFilterForm((f) => ({ ...f, ...patch }))
           }
+          onResetFilters={() => {
+            setFilterForm(emptyMapFiltersForm());
+            setSelectedPartners(new Set());
+          }}
           partnerOptions={partnerOptions}
           selectedPartners={selectedPartners}
           onPartnerToggle={onPartnerToggle}
-          spotlightActive={activeSpotlight}
-          onSpotlightSelect={handleSpotlightSelect}
-          spotlightPoolEmpty={points === null || points.length === 0}
         />
       </div>
-      {spotlightToast && (
-        <div
-          className="absolute right-4 top-[19.5rem] z-[35] max-w-[min(18rem,calc(100vw-2rem))] rounded-md border border-amber-800/50 bg-amber-950/95 px-3 py-2 text-sm text-amber-100 shadow-lg backdrop-blur"
-          role="status"
-        >
-          {spotlightToast}
-        </div>
-      )}
       {selected && (
         <>
           <button
@@ -872,13 +1066,15 @@ export default function MapDashboard() {
       )}
       {isLoaded ? (
         <GoogleMap
+          key={mapDarkMode ? "basemap-dark" : "basemap-light"}
           mapContainerStyle={mapContainerStyle}
-          center={defaultCenter}
-          zoom={defaultZoom}
+          center={mapBootCenter}
+          zoom={mapBootZoom}
           onLoad={onMapLoad}
           onUnmount={onMapUnmount}
           options={{
             mapId,
+            colorScheme: mapDarkMode ? "DARK" : "LIGHT",
             mapTypeControl: false,
             streetViewControl: false,
             fullscreenControl: true,
@@ -890,6 +1086,19 @@ export default function MapDashboard() {
       ) : (
         <div aria-hidden style={mapContainerStyle} />
       )}
+      {spotlightToast && (
+        <div
+          className="absolute bottom-32 left-1/2 z-[35] max-w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-amber-800/50 bg-amber-950/95 px-3 py-2 text-sm text-amber-100 shadow-lg backdrop-blur"
+          role="status"
+        >
+          {spotlightToast}
+        </div>
+      )}
+      <MapSpotlightBar
+        active={activeSpotlight}
+        onSelect={handleSpotlightSelect}
+        poolEmpty={points === null || points.length === 0}
+      />
     </div>
   );
 }

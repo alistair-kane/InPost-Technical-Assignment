@@ -93,12 +93,22 @@ def build_points_mongo_filter(
     max_rating: float | None,
     only_without_google_place: bool,
     partner_ids: list[Any] | None,
+    min_review_time: int | None,
+    max_review_time: int | None,
 ) -> dict[str, Any]:
     base = point_query_filter()
     rating_bounds = min_rating is not None or max_rating is not None
     partner_filter = bool(partner_ids)
+    review_time_bounds = (
+        min_review_time is not None and max_review_time is not None
+    )
 
-    if not rating_bounds and not only_without_google_place and not partner_filter:
+    if (
+        not rating_bounds
+        and not only_without_google_place
+        and not partner_filter
+        and not review_time_bounds
+    ):
         return base
 
     parts: list[dict[str, Any]] = [base]
@@ -116,6 +126,20 @@ def build_points_mongo_filter(
 
     if partner_filter and partner_ids is not None:
         parts.append({"partner_id": {"$in": partner_ids}})
+
+    if review_time_bounds:
+        t_rng: dict[str, Any] = {}
+        if min_review_time is not None:
+            t_rng["$gte"] = min_review_time
+        if max_review_time is not None:
+            t_rng["$lte"] = max_review_time
+        parts.append(
+            {
+                "google_reviews": {
+                    "$elemMatch": {"time_unix": t_rng},
+                }
+            }
+        )
 
     if len(parts) == 1:
         return parts[0]
@@ -197,11 +221,30 @@ def list_points(
     max_rating: float | None = Query(default=None),
     no_google_place_only: bool = Query(default=False),
     partner_id: list[str] | None = Query(default=None),
+    min_review_time: int | None = Query(default=None),
+    max_review_time: int | None = Query(default=None),
 ) -> PointsResponse:
     if min_rating is not None and max_rating is not None and min_rating > max_rating:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "min_rating must be less than or equal to max_rating",
+        )
+
+    rt_min = min_review_time is not None
+    rt_max = max_review_time is not None
+    if rt_min != rt_max:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "min_review_time and max_review_time must both be set or both omitted",
+        )
+    if (
+        min_review_time is not None
+        and max_review_time is not None
+        and min_review_time > max_review_time
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "min_review_time must be less than or equal to max_review_time",
         )
 
     partner_values = _parse_partner_id_values(partner_id)
@@ -210,6 +253,8 @@ def list_points(
         max_rating=max_rating,
         only_without_google_place=no_google_place_only,
         partner_ids=partner_values if partner_values else None,
+        min_review_time=min_review_time,
+        max_review_time=max_review_time,
     )
 
     cursor = coll.find(filter=query_filter, projection=POINT_FIELDS).sort(
