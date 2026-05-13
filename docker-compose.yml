@@ -7,36 +7,36 @@ services:
       - mongo_data:/data/db
     restart: unless-stopped
 
-  api:
-    build:
-      context: ./apps/api
-    ports:
-      - "8000:8000"
-    environment:
-      MONGODB_URI: mongodb://mongo:27017/inpost_assignment
-      MONGODB_DB: inpost_assignment
-      MONGODB_COLLECTION: inpost_point_google_places
-      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET in .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-    depends_on:
-      - mongo
-    restart: unless-stopped
+  # api:
+  #   build:
+  #     context: ./apps/api
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     MONGODB_URI: mongodb://mongo:27017/inpost_assignment
+  #     MONGODB_DB: inpost_assignment
+  #     MONGODB_COLLECTION: inpost_point_google_places
+  #     MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET in .env}
+  #     CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  #   depends_on:
+  #     - mongo
+  #   restart: unless-stopped
 
-  web:
-    build:
-      context: ./apps/web
-      args:
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
-        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID:-}
-    ports:
-      - "3000:3000"
-    environment:
-      FASTAPI_URL: http://api:8000
-      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET in .env}
-      NODE_ENV: production
-    depends_on:
-      - api
-    restart: unless-stopped
+  # web:
+  #   build:
+  #     context: ./apps/web
+  #     args:
+  #       NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+  #       NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID:-}
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     FASTAPI_URL: http://api:8000
+  #     MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET in .env}
+  #     NODE_ENV: production
+  #   depends_on:
+  #     - api
+  #   restart: unless-stopped
 
 volumes:
   mongo_data:

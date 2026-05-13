@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
 import requests
 
@@ -27,7 +27,7 @@ class InpostClient:
         total_pages = max(1, int(data.get("total_pages") or page))
         return list(batch), total_pages
 
-    def _item_country_matches(self, item: dict[str, Any]) -> bool:
+    def item_country_matches(self, item: dict[str, Any]) -> bool:
         if not self.country_code:
             return True
         item_country = (item.get("country") or self.country_code).strip().upper()
@@ -43,7 +43,7 @@ class InpostClient:
             ids_in_batch = [inpost_point_id_from_item(i) for i in batch]
             already = repo.existing_point_ids(ids_in_batch)
             for item in batch:
-                if not self._item_country_matches(item):
+                if not self.item_country_matches(item):
                     continue
                 pid = inpost_point_id_from_item(item)
                 if pid in already:
@@ -55,3 +55,15 @@ class InpostClient:
                 break
             page += 1
         return pending[:sample_size]
+
+    def iter_item_batches(self) -> Iterator[list[dict[str, Any]]]:
+        """Yield each page of items from the InPost points API until exhausted."""
+        page = self.start_page
+        while True:
+            batch, total_pages = self._fetch_page(page)
+            if not batch:
+                break
+            yield batch
+            if page >= total_pages:
+                break
+            page += 1

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 # Matches map API `point_query_filter()` (map_eligible=True + sane coords). Partial index
 # filters cannot use $ne, $nin (incl. $nin: [null]) — they lower to $not; use $type instead.
@@ -27,6 +27,7 @@ class PointRepository:
             name="map_filters_rating_distance_partial",
             partialFilterExpression=_MAP_POINTS_PARTIAL_FILTER,
         )
+        self.coll.create_index([("location", "2dsphere")], name="map_location_2dsphere")
 
     def existing_point_ids(self, ids: list[str]) -> set[str]:
         if not ids:
@@ -45,3 +46,26 @@ class PointRepository:
     def upsert_point(self, doc: dict[str, Any]) -> None:
         pid = doc.get("inpost_point_id")
         self.coll.replace_one({"inpost_point_id": pid}, doc, upsert=True)
+
+    def find_holders_of_place_id(
+        self, place_id: str, exclude_inpost_point_id: str
+    ) -> list[dict[str, Any]]:
+        return list(
+            self.coll.find(
+                {
+                    "google_place_id": place_id,
+                    "inpost_point_id": {"$ne": exclude_inpost_point_id},
+                },
+                {
+                    "inpost_point_id": 1,
+                    "distance_to_google_place_m": 1,
+                    "status": 1,
+                    "google_user_ratings_total": 1,
+                    "google_reviews": 1,
+                    "_id": 1,
+                },
+            )
+        )
+
+    def get_by_inpost_point_id(self, inpost_point_id: str) -> Optional[dict[str, Any]]:
+        return self.coll.find_one({"inpost_point_id": inpost_point_id})

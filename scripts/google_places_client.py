@@ -32,6 +32,17 @@ class GooglePlacesClient:
         return cc.lower()
 
     _PLACE_DETAILS_FULL_FIELDS = "name,place_id,url,reviews,rating,user_ratings_total"
+    _PLACE_DETAILS_PREVIEW_CONFLICT_FIELDS = "rating,user_ratings_total,reviews"
+
+    def place_details_preview_for_conflict(self, place_id: str) -> Optional[dict[str, Any]]:
+        data = self.place_details(
+            place_id, fields=self._PLACE_DETAILS_PREVIEW_CONFLICT_FIELDS
+        )
+        time.sleep(max(0.0, self.request_delay))
+        if data.get("status") != "OK":
+            return None
+        res = data.get("result")
+        return res if isinstance(res, dict) else None
 
     def place_details(
         self,
@@ -100,20 +111,14 @@ class GooglePlacesClient:
             page_token = nxt
 
     def enrich_place_details(self, place_id: str, base: dict[str, Any]) -> None:
-        resp_primary = self.place_details(place_id)
+        resp_primary = self.place_details(place_id, reviews_no_translations=True)
         time.sleep(max(0.0, self.request_delay))
         if resp_primary.get("status") != "OK":
             return
         place_main = resp_primary.get("result") or {}
-        resp_original = self.place_details(place_id, reviews_no_translations=True)
-        time.sleep(max(0.0, self.request_delay))
-        reviews_original: Optional[list[Any]] = None
-        if resp_original.get("status") == "OK":
-            reviews_original = (resp_original.get("result") or {}).get("reviews")
         self._apply_place_details_to_doc(
             base,
             place_main,
-            reviews_original_language=reviews_original if isinstance(reviews_original, list) else None,
         )
 
     @staticmethod

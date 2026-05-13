@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from constants import DEFAULT_COUNTRY_CODE
+from constants import DEFAULT_COUNTRY_CODE, INPOST_NAME_SUBSTRING
 from haversine import Unit, haversine as haversine_distance_m
+
+
+def optional_trimmed_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
 
 
 def inpost_point_id_from_item(item: dict[str, Any]) -> str:
@@ -13,8 +20,90 @@ def inpost_point_id_from_item(item: dict[str, Any]) -> str:
     return f"{country}/{code}".strip("/")
 
 
+def synthetic_inpost_item_from_stored(doc: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild minimal InPost API-shaped dict from a Mongo point document (re-resolution)."""
+    return {
+        "country": doc.get("country") or DEFAULT_COUNTRY_CODE,
+        "name": doc.get("name"),
+        "location": {
+            "latitude": doc.get("latitude"),
+            "longitude": doc.get("longitude"),
+        },
+        "address": {},
+        "address_details": {},
+        "partner_id": doc.get("partner_id"),
+        "status": doc.get("status"),
+    }
+
+
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return float(haversine_distance_m((lat1, lon1), (lat2, lon2), unit=Unit.METERS))
+
+
+def ranked_inpost_named_nearby_results(
+    raw_results: list[dict[str, Any]],
+    center_lat: float,
+    center_lng: float,
+) -> list[tuple[float, dict[str, Any]]]:
+    """InPost-name-filtered Nearby results sorted by distance then ``place_id``."""
+    candidates: list[tuple[float, dict[str, Any]]] = []
+    for r in raw_results:
+        name = (r.get("name") or "")
+        if INPOST_NAME_SUBSTRING not in name.lower():
+            continue
+        geom = r.get("geometry") or {}
+        loc = geom.get("location") or {}
+        try:
+            rlat = float(loc.get("lat"))
+            rlng = float(loc.get("lng"))
+        except (TypeError, ValueError):
+            continue
+        d = distance_m(center_lat, center_lng, rlat, rlng)
+        candidates.append((d, r))
+    candidates.sort(key=lambda t: (t[0], str((t[1].get("place_id") or ""))))
+    return candidates
+
+
+def review_time_unix_min_max_from_reviews(
+    reviews: list[dict[str, Any]] | None,
+) -> tuple[Any, Any]:
+    """Min/max `time_unix` across review dicts; (None, None) if none present."""
+    if not reviews:
+        return None, None
+    vals: list[int] = []
+    for r in reviews:
+        if not isinstance(r, dict):
+            continue
+        t = r.get("time_unix")
+        if isinstance(t, bool):
+            continue
+        if isinstance(t, int):
+            vals.append(t)
+        elif isinstance(t, float) and t == t:  # not NaN
+            vals.append(int(t))
+    if not vals:
+        return None, None
+    return min(vals), max(vals)
+
+
+def apply_location_and_review_time_bounds(doc: dict[str, Any]) -> None:
+    """Set GeoJSON `location` and denormalized review time bounds for map queries."""
+    lat, lng = doc.get("latitude"), doc.get("longitude")
+    try:
+        la = float(lat)  # type: ignore[arg-type]
+        ln = float(lng)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        doc.pop("location", None)
+    else:
+        if -90.0 <= la <= 90.0 and -180.0 <= ln <= 180.0:
+            doc["location"] = {"type": "Point", "coordinates": [ln, la]}
+        else:
+            doc.pop("location", None)
+    raw = doc.get("google_reviews")
+    reviews = raw if isinstance(raw, list) else None
+    tmin, tmax = review_time_unix_min_max_from_reviews(reviews)
+    doc["google_reviews_time_unix_min"] = tmin
+    doc["google_reviews_time_unix_max"] = tmax
 
 
 def map_eligible_for_document(doc: dict[str, Any]) -> bool:

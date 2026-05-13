@@ -1,3 +1,10 @@
+import {
+  PACZKOPUNKT_PARTNER_IDS,
+  PACZKOPUNKT_UI_PARTNER_ID,
+} from "@/lib/paczkopunktPartnerIds";
+
+export { PACZKOPUNKT_PARTNER_IDS, PACZKOPUNKT_UI_PARTNER_ID };
+
 /** Slider low end (1 star). Default = no `min_rating` query param. */
 export const RATING_SLIDER_MIN = 1;
 /** Slider high end (5 stars). Default = no `max_rating` query param. */
@@ -21,6 +28,71 @@ export const REVIEW_TIME_KNOT_LABELS: readonly string[] = [
   "7d",
   "1d",
 ];
+
+const _paczkopunktSet = new Set<number>(PACZKOPUNKT_PARTNER_IDS);
+
+/** Collapse paczkopunkt partner ids into a single option for the filters panel. */
+export function mergePartnerIdsForUi(partnerIds: number[]): number[] {
+  const unique = [...new Set(partnerIds)].filter((n) => Number.isFinite(n));
+  let hasPaczkopunkt = false;
+  const rest: number[] = [];
+  for (const id of unique.sort((a, b) => a - b)) {
+    if (_paczkopunktSet.has(id)) {
+      hasPaczkopunkt = true;
+    } else {
+      rest.push(id);
+    }
+  }
+  if (!hasPaczkopunkt) {
+    return rest;
+  }
+  return [...rest, PACZKOPUNKT_UI_PARTNER_ID].sort((a, b) => a - b);
+}
+
+/** Maps a UI filter partner id to API `partner_id` query values. */
+export function partnerQueryIdsForUiId(uiPartnerId: number): readonly number[] {
+  if (uiPartnerId === PACZKOPUNKT_UI_PARTNER_ID) {
+    return PACZKOPUNKT_PARTNER_IDS;
+  }
+  return [uiPartnerId];
+}
+
+export function partnerLocationTypeFilterLabel(uiPartnerId: number): string {
+  if (uiPartnerId === PACZKOPUNKT_UI_PARTNER_ID) {
+    return "Paczkopunkt";
+  }
+  return `Partner ${uiPartnerId}`;
+}
+
+/**
+ * After `partnerOptions` is merged for UI, remap legacy `selectedPartners` entries
+ * (e.g. `33` alone) onto the canonical chip id and drop selections no longer listed.
+ */
+export function normalizeSelectedPartnersForUi(
+  selected: Set<number>,
+  partnerOptions: number[]
+): Set<number> {
+  if (selected.size === 0) {
+    return selected;
+  }
+  const allowed = new Set(partnerOptions);
+  const next = new Set<number>();
+  for (const id of selected) {
+    const ui =
+      _paczkopunktSet.has(id) && allowed.has(PACZKOPUNKT_UI_PARTNER_ID)
+        ? PACZKOPUNKT_UI_PARTNER_ID
+        : id;
+    if (allowed.has(ui)) {
+      next.add(ui);
+    }
+  }
+  const sig = (s: Set<number>) =>
+    [...s].sort((a, b) => a - b).join(",");
+  if (sig(next) === sig(selected)) {
+    return selected;
+  }
+  return next;
+}
 
 /** Seconds before `nowSec` for each knot index (same order as labels). */
 export function reviewTimeKnotOffsetSec(knotIdx: number): number {
@@ -65,35 +137,6 @@ export function isDefaultReviewTimeRange(
   return minIdx === 0 && maxIdx === REVIEW_TIME_MAX_KNOT_INDEX;
 }
 
-/** True when any map query filter differs from defaults (rating, time, proximity, partner subset). */
-export function areMapFiltersActive(
-  form: MapFiltersForm,
-  partnerOptions: number[],
-  selectedPartners: Set<number>
-): boolean {
-  if (
-    form.minRating > RATING_SLIDER_MIN ||
-    form.maxRating < RATING_SLIDER_MAX
-  ) {
-    return true;
-  }
-  if (form.onlyWithoutGooglePlace) {
-    return true;
-  }
-  if (!isDefaultReviewTimeRange(form.reviewTimeMinIdx, form.reviewTimeMaxIdx)) {
-    return true;
-  }
-  if (partnerOptions.length > 0) {
-    const allPartners =
-      selectedPartners.size === 0 ||
-      selectedPartners.size === partnerOptions.length;
-    if (!allPartners) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function isSameLocalCalendarDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -133,7 +176,59 @@ export type MapFiltersForm = {
   onlyWithoutGooglePlace: boolean;
   reviewTimeMinIdx: number;
   reviewTimeMaxIdx: number;
+  /** Default first-load / Reset: Operating only (Created + Disabled off). */
+  includeInpostStatusOperating: boolean;
+  includeInpostStatusCreated: boolean;
+  includeInpostStatusDisabled: boolean;
 };
+
+/** InPost `status` on the Mongo document (normalized for API query params). */
+export type InpostStatusFilterBucket = "operating" | "created" | "disabled";
+
+export const ALL_INPOST_STATUS_BUCKETS: readonly InpostStatusFilterBucket[] = [
+  "operating",
+  "created",
+  "disabled",
+];
+
+export function inpostStatusBucketsForQuery(
+  form: MapFiltersForm
+): InpostStatusFilterBucket[] | null {
+  const on: InpostStatusFilterBucket[] = [];
+  if (form.includeInpostStatusOperating) {
+    on.push("operating");
+  }
+  if (form.includeInpostStatusCreated) {
+    on.push("created");
+  }
+  if (form.includeInpostStatusDisabled) {
+    on.push("disabled");
+  }
+  /* All three on => omit param (no status restriction). */
+  if (on.length === ALL_INPOST_STATUS_BUCKETS.length) {
+    return null;
+  }
+  return on;
+}
+
+export function patchToggleInpostStatusFilter(
+  form: MapFiltersForm,
+  key:
+    | "includeInpostStatusOperating"
+    | "includeInpostStatusCreated"
+    | "includeInpostStatusDisabled"
+): Partial<MapFiltersForm> | null {
+  const keys = [
+    "includeInpostStatusOperating",
+    "includeInpostStatusCreated",
+    "includeInpostStatusDisabled",
+  ] as const;
+  const countTrue = keys.filter((k) => form[k]).length;
+  if (form[key] && countTrue <= 1) {
+    return null;
+  }
+  return { [key]: !form[key] };
+}
 
 export const emptyMapFiltersForm = (): MapFiltersForm => ({
   minRating: RATING_SLIDER_MIN,
@@ -141,7 +236,69 @@ export const emptyMapFiltersForm = (): MapFiltersForm => ({
   onlyWithoutGooglePlace: false,
   reviewTimeMinIdx: 0,
   reviewTimeMaxIdx: REVIEW_TIME_MAX_KNOT_INDEX,
+  includeInpostStatusOperating: true,
+  includeInpostStatusCreated: false,
+  includeInpostStatusDisabled: false,
 });
+
+/** Ensures every `MapFiltersForm` field is defined (fixes HMR / partial state). */
+export function coalesceMapFiltersForm(
+  partial: Partial<MapFiltersForm> | MapFiltersForm
+): MapFiltersForm {
+  const d = emptyMapFiltersForm();
+  return {
+    minRating: partial.minRating ?? d.minRating,
+    maxRating: partial.maxRating ?? d.maxRating,
+    onlyWithoutGooglePlace:
+      partial.onlyWithoutGooglePlace ?? d.onlyWithoutGooglePlace,
+    reviewTimeMinIdx: partial.reviewTimeMinIdx ?? d.reviewTimeMinIdx,
+    reviewTimeMaxIdx: partial.reviewTimeMaxIdx ?? d.reviewTimeMaxIdx,
+    includeInpostStatusOperating:
+      partial.includeInpostStatusOperating ?? d.includeInpostStatusOperating,
+    includeInpostStatusCreated:
+      partial.includeInpostStatusCreated ?? d.includeInpostStatusCreated,
+    includeInpostStatusDisabled:
+      partial.includeInpostStatusDisabled ?? d.includeInpostStatusDisabled,
+  };
+}
+
+/** First-load / Reset baseline: show Operating points only. */
+export function isDefaultInpostStatusSelection(form: MapFiltersForm): boolean {
+  return (
+    form.includeInpostStatusOperating === true &&
+    form.includeInpostStatusCreated === false &&
+    form.includeInpostStatusDisabled === false
+  );
+}
+
+/** True when any map query filter differs from defaults (rating, time, proximity, partner subset, InPost status). */
+export function areMapFiltersActive(
+  form: MapFiltersForm,
+  partnerOptions: number[],
+  selectedPartners: Set<number>
+): boolean {
+  if (
+    form.minRating > RATING_SLIDER_MIN ||
+    form.maxRating < RATING_SLIDER_MAX
+  ) {
+    return true;
+  }
+  if (form.onlyWithoutGooglePlace) {
+    return true;
+  }
+  if (!isDefaultReviewTimeRange(form.reviewTimeMinIdx, form.reviewTimeMaxIdx)) {
+    return true;
+  }
+  if (partnerOptions.length > 0) {
+    if (selectedPartners.size > 0) {
+      return true;
+    }
+  }
+  if (!isDefaultInpostStatusSelection(form)) {
+    return true;
+  }
+  return false;
+}
 
 export function buildMapPointsQueryString(
   form: MapFiltersForm,
@@ -172,16 +329,24 @@ export function buildMapPointsQueryString(
     sp.set("max_review_time", String(maxUnix));
   }
 
-  if (partnerOptions.length > 0) {
-    const allPartners =
-      selectedPartners.size === 0 ||
-      selectedPartners.size === partnerOptions.length;
-    if (!allPartners) {
-      [...selectedPartners]
-        .sort((a, b) => a - b)
-        .forEach((id) => {
-          sp.append("partner_id", String(id));
-        });
+  if (partnerOptions.length > 0 && selectedPartners.size > 0) {
+    const seen = new Set<string>();
+    for (const id of [...selectedPartners].sort((a, b) => a - b)) {
+      for (const qid of partnerQueryIdsForUiId(id)) {
+        const key = String(qid);
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        sp.append("partner_id", key);
+      }
+    }
+  }
+
+  const statusBuckets = inpostStatusBucketsForQuery(form);
+  if (statusBuckets && statusBuckets.length > 0) {
+    for (const b of statusBuckets) {
+      sp.append("inpost_status", b);
     }
   }
 
@@ -202,5 +367,5 @@ export function uniquePartnerIdsFromPoints(
       s.add(n);
     }
   }
-  return [...s].sort((a, b) => a - b);
+  return mergePartnerIdsForUi([...s]);
 }

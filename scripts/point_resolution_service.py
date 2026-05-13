@@ -4,13 +4,24 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from constants import DEFAULT_COUNTRY_CODE, INPOST_NAME_SUBSTRING
+from constants import COUNTRY_BOUNDING_BOXES, DEFAULT_COUNTRY_CODE
 from google_places_client import GooglePlacesClient
 from inpost_client import InpostClient
+from locker_precedence import apply_preview_to_locker_fields, newcomer_beats_all_holders
 from point_repository import PointRepository
-from point_utils import distance_m, inpost_point_id_from_item, map_eligible_for_document
+from point_utils import (
+    apply_location_and_review_time_bounds,
+    distance_m,
+    inpost_point_id_from_item,
+    map_eligible_for_document,
+    optional_trimmed_str,
+    ranked_inpost_named_nearby_results,
+    synthetic_inpost_item_from_stored,
+)
 
 logger = logging.getLogger(__name__)
+
+MAX_RESOLVE_DEPTH = 3
 
 
 class PointResolutionService:
@@ -35,14 +46,13 @@ class PointResolutionService:
             ln = float(lng)  # type: ignore[arg-type]
         except (TypeError, ValueError):
             return True
-        return abs(la) <= 1 and abs(ln) <= 1
-
-    @staticmethod
-    def _optional_trimmed_str(value: Any) -> Optional[str]:
-        if value is None:
-            return None
-        s = str(value).strip()
-        return s or None
+        if abs(la) <= 1 and abs(ln) <= 1:
+            return True
+        bbox = COUNTRY_BOUNDING_BOXES.get((DEFAULT_COUNTRY_CODE or "").strip().upper())
+        if bbox is None:
+            return False
+        min_lat, min_lng, max_lat, max_lng = bbox
+        return not (min_lat <= la <= max_lat and min_lng <= ln <= max_lng)
 
     @staticmethod
     def _build_geocode_query(item: dict[str, Any]) -> str:
@@ -74,28 +84,6 @@ class PointResolutionService:
         if country:
             pieces.append(str(country).strip())
         return ", ".join(p for p in pieces if p)
-
-    @staticmethod
-    def _pick_closest_inpost_place(
-        results: list[dict[str, Any]], center_lat: float, center_lng: float
-    ) -> Optional[dict[str, Any]]:
-        candidates: list[tuple[float, dict[str, Any]]] = []
-        for r in results:
-            name = (r.get("name") or "")
-            if INPOST_NAME_SUBSTRING not in name.lower():
-                continue
-            geom = r.get("geometry") or {}
-            loc = geom.get("location") or {}
-            try:
-                rlat = float(loc.get("lat"))
-                rlng = float(loc.get("lng"))
-            except (TypeError, ValueError):
-                continue
-            candidates.append((distance_m(center_lat, center_lng, rlat, rlng), r))
-        if not candidates:
-            return None
-        candidates.sort(key=lambda x: x[0])
-        return candidates[0][1]
 
     @staticmethod
     def _common_base(item: dict[str, Any]) -> tuple[dict[str, Any], Any, Any]:
@@ -130,21 +118,29 @@ class PointResolutionService:
             "inpost_name_match": False,
             "validation_status": None,
             "search_strategy": None,
+            "status": optional_trimmed_str(item.get("status")),
             "updated_at": now,
         }
         return base, lat, lng
 
     def process_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        return self._process_item_impl(item, 0)
+
+    def _process_item_impl(self, item: dict[str, Any], depth: int) -> dict[str, Any]:
         base, lat, lng = self._common_base(item)
         base["search_strategy"] = "nearby"
         base["nearby_radius_m"] = self.radius_meters
         base["nearby_keyword"] = self.keyword
+        if depth > MAX_RESOLVE_DEPTH:
+            base["validation_status"] = "RESOLVE_DEPTH_EXCEEDED"
+            base["map_eligible"] = map_eligible_for_document(base)
+            return base
         if self._bad_coordinates(lat, lng):
             base["validation_status"] = "SKIPPED_BAD_COORDINATES"
             base["map_eligible"] = map_eligible_for_document(base)
             return base
         composed_address = self._build_geocode_query(item)
-        base["formatted_address"] = self._optional_trimmed_str(composed_address)
+        base["formatted_address"] = optional_trimmed_str(composed_address)
         lat_f = float(lat)  # type: ignore[arg-type]
         lng_f = float(lng)  # type: ignore[arg-type]
         status, raw_results = self.places_client.nearby_search_all_pages(
@@ -159,19 +155,65 @@ class PointResolutionService:
             base["validation_status"] = "NEARBY_FAILED"
             base["map_eligible"] = map_eligible_for_document(base)
             return base
-        chosen = self._pick_closest_inpost_place(raw_results, lat_f, lng_f)
-        if chosen is None:
+        ranked = ranked_inpost_named_nearby_results(raw_results, lat_f, lng_f)
+        if not ranked:
             base["validation_status"] = "NO_INPOST_IN_RADIUS"
             base["map_eligible"] = map_eligible_for_document(base)
             return base
-        pname = (chosen.get("name") or "").strip()
-        pid = chosen.get("place_id")
-        base["google_place_name"] = pname or None
-        base["candidate_place_id"] = pid
-        if not pid:
-            base["validation_status"] = "NEARBY_MISSING_PLACE_ID"
+
+        my_pid = str(base.get("inpost_point_id") or "")
+        picked: Optional[dict[str, Any]] = None
+        picked_dist: Optional[float] = None
+        for dist_m, chosen in ranked:
+            pid_raw = chosen.get("place_id")
+            pid = str(pid_raw).strip() if pid_raw else ""
+            if not pid:
+                continue
+            holders = self.repository.find_holders_of_place_id(pid, my_pid)
+            if not holders:
+                picked = chosen
+                picked_dist = dist_m
+                break
+            preview = self.places_client.place_details_preview_for_conflict(pid)
+            newcomer: dict[str, Any] = {
+                "status": base.get("status"),
+                "distance_to_google_place_m": round(float(dist_m), 2),
+                "_id": None,
+                "inpost_point_id": base.get("inpost_point_id"),
+            }
+            if preview:
+                apply_preview_to_locker_fields(newcomer, preview)
+            else:
+                newcomer["google_rating"] = None
+                newcomer["google_user_ratings_total"] = None
+                newcomer["google_reviews"] = None
+            if newcomer_beats_all_holders(newcomer, holders):
+                for h in sorted(holders, key=lambda x: str(x.get("inpost_point_id") or "")):
+                    hid = str(h.get("inpost_point_id") or "")
+                    if not hid:
+                        continue
+                    full = self.repository.get_by_inpost_point_id(hid)
+                    if not full:
+                        continue
+                    sub_item = synthetic_inpost_item_from_stored(full)
+                    sub_doc = self._process_item_impl(sub_item, depth + 1)
+                    apply_location_and_review_time_bounds(sub_doc)
+                    self.repository.upsert_point(sub_doc)
+                picked = chosen
+                picked_dist = dist_m
+                break
+
+        if picked is None or picked_dist is None:
+            base["validation_status"] = "NO_FREE_PLACE_IN_RADIUS"
             base["map_eligible"] = map_eligible_for_document(base)
             return base
+
+        chosen = picked
+        dist_m = picked_dist
+        pname = (chosen.get("name") or "").strip()
+        pid = str(chosen.get("place_id") or "").strip()
+        base["google_place_name"] = pname or None
+        base["candidate_place_id"] = pid
         geom = chosen.get("geometry") or {}
         loc = geom.get("location") or {}
         try:
@@ -192,6 +234,7 @@ class PointResolutionService:
         logger.info("Loaded %s InPost point(s) to upsert.", len(items))
         for i, item in enumerate(items, start=1):
             doc = self.process_item(item)
+            apply_location_and_review_time_bounds(doc)
             pid = doc.get("inpost_point_id")
             self.repository.upsert_point(doc)
             logger.info(
@@ -199,5 +242,5 @@ class PointResolutionService:
                 i,
                 len(items),
                 pid,
-                doc.get("validation_status")
+                doc.get("validation_status"),
             )

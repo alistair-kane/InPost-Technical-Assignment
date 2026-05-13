@@ -4,6 +4,7 @@ import {
   SPOTLIGHT_ICON_SRC,
   SPOTLIGHT_PRESET_LABELS,
   SPOTLIGHT_PRESET_ORDER,
+  SPOTLIGHT_PRESET_TOOLTIPS,
   type SpotlightPresetId,
 } from "@/lib/mapSpotlightPresets";
 
@@ -14,7 +15,7 @@ type MapSpotlightBarProps = {
 };
 
 /**
- * Spotlight presets as a row of controls just above the bottom of the map view.
+ * Spotlight presets as a row of controls (positioning is provided by the parent).
  */
 export function MapSpotlightBar({
   active,
@@ -23,22 +24,20 @@ export function MapSpotlightBar({
 }: MapSpotlightBarProps) {
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 bottom-4 z-[21] flex justify-center px-3 pb-[max(0.25rem,env(safe-area-inset-bottom,0px))]"
+      className="pointer-events-auto flex max-w-[min(100%,min(92vw,55rem))] flex-wrap items-center justify-center gap-2 sm:gap-2.5"
       role="toolbar"
       aria-label="Location spotlight"
     >
-      <div className="pointer-events-auto flex max-w-[min(100%,min(92vw,55rem))] flex-wrap items-center justify-center gap-2 sm:gap-2.5">
-        {SPOTLIGHT_PRESET_ORDER.map((id) => {
-          const pressed = active === id;
-          return (
+      {SPOTLIGHT_PRESET_ORDER.map((id) => {
+        const pressed = active === id;
+        return (
+          <span key={id} className="group/spot relative inline-flex">
             <button
-              key={id}
               type="button"
               disabled={poolEmpty}
               aria-pressed={pressed}
-              title={SPOTLIGHT_PRESET_LABELS[id]}
               onClick={() => onSelect(id)}
-              className={`flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2.5 sm:px-3 sm:py-2.5 ${pressed
+              className={`peer flex shrink-0 items-center gap-2 rounded-md border px-2.5 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 sm:gap-2.5 sm:px-3 sm:py-2.5 ${pressed
                   ? "border-black/20 bg-[#FFCC04] text-[#141414] shadow-sm ring-1 ring-black/10"
                   : "border-white/12 bg-neutral-900/90 text-neutral-200 hover:border-amber-500/25 hover:bg-neutral-800/90"
                 }`}
@@ -58,9 +57,15 @@ export function MapSpotlightBar({
                 {SPOTLIGHT_PRESET_LABELS[id]}
               </span>
             </button>
-          );
-        })}
-      </div>
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full left-1/2 z-[100] mb-2 w-max max-w-[min(92vw,22rem)] -translate-x-1/2 whitespace-normal rounded-lg border border-white/20 bg-neutral-950/98 px-3.5 py-2.5 text-left text-base font-normal normal-case leading-snug tracking-normal text-neutral-100 shadow-xl opacity-0 transition-opacity duration-200 group-hover/spot:opacity-100 peer-hover:opacity-100 peer-focus-visible:opacity-100 sm:max-w-[min(92vw,26rem)] sm:px-4 sm:py-3 sm:text-lg"
+            >
+              {SPOTLIGHT_PRESET_TOOLTIPS[id]}
+            </span>
+          </span>
+        );
+      })}
     </div>
   );
 }

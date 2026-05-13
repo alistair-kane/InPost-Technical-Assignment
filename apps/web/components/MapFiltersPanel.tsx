@@ -1,10 +1,13 @@
 "use client";
 
 import { markerSvgSrc } from "@/lib/markerSvgSrc";
+import { INPOST_STATUS_DOT_CLASS } from "@/components/inpostStatusDot";
 
 import {
   areMapFiltersActive,
   formatReviewTimeFilterSummary,
+  patchToggleInpostStatusFilter,
+  partnerLocationTypeFilterLabel,
   RATING_SLIDER_MAX,
   RATING_SLIDER_MIN,
   RATING_SLIDER_STEP,
@@ -52,7 +55,7 @@ export function MapFiltersPanel({
 
   const ratingSummary =
     form.minRating === RATING_SLIDER_MIN &&
-    form.maxRating === RATING_SLIDER_MAX
+      form.maxRating === RATING_SLIDER_MAX
       ? "Any rating"
       : `${minLabel} – ${maxLabel} ★`;
 
@@ -79,14 +82,104 @@ export function MapFiltersPanel({
 
   return (
     <div className="w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-white/15 bg-neutral-950/95 text-neutral-100 shadow-xl backdrop-blur">
-      <details className="group">
+      <details className="group/filtersDrawer">
         <summary className="cursor-pointer list-none px-3 py-2.5 text-lg font-medium tracking-tight outline-none marker:content-none [&::-webkit-details-marker]:hidden">
           <span className="inline-flex w-full items-center justify-between gap-2">
             <span>Filters</span>
-            <span className="text-neutral-500 group-open:rotate-180 transition-transform">▾</span>
+            <span className="text-neutral-500 transition-transform group-open/filtersDrawer:rotate-180">▾</span>
           </span>
         </summary>
         <div className="border-t border-white/10 px-3 pb-3 pt-2 text-sm leading-snug">
+          <fieldset>
+            <legend className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+              InPost status
+            </legend>
+            <ul className="flex flex-row flex-wrap justify-center gap-2">
+              <li>
+                <button
+                  type="button"
+                  aria-pressed={form.includeInpostStatusOperating}
+                  title="Include Operating locations"
+                  onClick={() => {
+                    const p = patchToggleInpostStatusFilter(
+                      form,
+                      "includeInpostStatusOperating"
+                    );
+                    if (p) {
+                      onFormChange(p);
+                    }
+                  }}
+                  className={`flex items-center gap-2.5 overflow-visible rounded-md border px-2 py-2 text-left text-neutral-200 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${form.includeInpostStatusOperating
+                    ? "border-amber-500/50 bg-neutral-800/90 shadow-sm ring-1 ring-amber-500/30"
+                    : "border-white/10 bg-neutral-950/80 opacity-45 hover:border-white/20 hover:opacity-90"
+                    }`}
+                >
+                  <span
+                    className={INPOST_STATUS_DOT_CLASS.operating}
+                    aria-hidden
+                  />
+                  <span className="leading-snug">Operating</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  aria-pressed={form.includeInpostStatusCreated}
+                  title="Include Created locations"
+                  onClick={() => {
+                    const p = patchToggleInpostStatusFilter(
+                      form,
+                      "includeInpostStatusCreated"
+                    );
+                    if (p) {
+                      onFormChange(p);
+                    }
+                  }}
+                  className={`flex items-center gap-2.5 overflow-visible rounded-md border px-2 py-2 text-left text-neutral-200 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${form.includeInpostStatusCreated
+                    ? "border-amber-500/50 bg-neutral-800/90 shadow-sm ring-1 ring-amber-500/30"
+                    : "border-white/10 bg-neutral-950/80 opacity-45 hover:border-white/20 hover:opacity-90"
+                    }`}
+                >
+                  <span
+                    className={INPOST_STATUS_DOT_CLASS.created}
+                    aria-hidden
+                  />
+                  <span className="leading-snug">Created</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  aria-pressed={form.includeInpostStatusDisabled}
+                  onClick={() => {
+                    const p = patchToggleInpostStatusFilter(
+                      form,
+                      "includeInpostStatusDisabled"
+                    );
+                    if (p) {
+                      onFormChange(p);
+                    }
+                  }}
+                  className={`group/disabledSt relative flex max-w-full items-center gap-2.5 overflow-visible rounded-md border px-2 py-2 text-left text-neutral-200 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${form.includeInpostStatusDisabled
+                    ? "border-amber-500/50 bg-neutral-800/90 shadow-sm ring-1 ring-amber-500/30"
+                    : "border-white/10 bg-neutral-950/80 opacity-45 hover:border-white/20 hover:opacity-90"
+                    }`}
+                >
+                  <span
+                    className={INPOST_STATUS_DOT_CLASS.disabled}
+                    aria-hidden
+                  />
+                  <span className="leading-snug">Disabled / Non-operating</span>
+                  <span
+                    role="tooltip"
+                    className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 w-max max-w-[min(16rem,calc(100vw-2rem))] -translate-x-1/2 rounded border border-white/10 bg-neutral-900/98 px-2 py-1.5 text-xs font-normal leading-snug text-neutral-300 opacity-0 shadow-lg transition-opacity group-hover/disabledSt:opacity-100"
+                  >
+                    Includes unknown statuses, or missing on the point
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </fieldset>
           {partnerOptions.length > 0 && (
             <fieldset className="mt-4">
               <legend className="mb-1.5 text-sm font-semibold uppercase tracking-wide text-neutral-500">
@@ -96,19 +189,20 @@ export function MapFiltersPanel({
                 {partnerOptions.map((id) => {
                   const active =
                     selectedPartners.size === 0 || selectedPartners.has(id);
+                  const label = partnerLocationTypeFilterLabel(id);
                   return (
                     <li key={id}>
                       <button
                         type="button"
                         aria-pressed={active}
-                        title={`Partner ${id}`}
+                        title={label}
                         onClick={() => onPartnerToggle(id)}
                         className={`rounded-lg border p-1.5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${active
-                            ? "border-amber-500/50 bg-neutral-800/90 shadow-sm ring-1 ring-amber-500/30"
-                            : "border-white/10 bg-neutral-950/80 opacity-45 hover:border-white/20 hover:opacity-90"
+                          ? "border-amber-500/50 bg-neutral-800/90 shadow-sm ring-1 ring-amber-500/30"
+                          : "border-white/10 bg-neutral-950/80 opacity-45 hover:border-white/20 hover:opacity-90"
                           }`}
                       >
-                        <span className="sr-only">Partner {id}</span>
+                        <span className="sr-only">{label}</span>
                         {/* eslint-disable-next-line @next/next/no-img-element -- public SVG marker */}
                         <img
                           src={markerSvgSrc(id)}

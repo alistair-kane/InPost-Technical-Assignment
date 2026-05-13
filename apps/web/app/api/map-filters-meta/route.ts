@@ -5,11 +5,6 @@ const FORWARD_QUERY_KEYS = [
   "max_rating",
   "min_review_time",
   "max_review_time",
-  "min_lat",
-  "max_lat",
-  "min_lng",
-  "max_lng",
-  "max_points",
 ] as const;
 
 function truthyNoGooglePlaceOnly(v: string | null): boolean {
@@ -57,9 +52,10 @@ export async function GET(req: Request) {
   if (truthyNoGooglePlaceOnly(incoming.get("no_google_place_only"))) {
     outbound.set("no_google_place_only", "true");
   }
-  outbound.set("include_review_snippets", "true");
   const qs = outbound.toString();
-  const upstreamUrl = qs ? `${base}/points?${qs}` : `${base}/points`;
+  const upstreamUrl = qs
+    ? `${base}/map-filters-meta?${qs}`
+    : `${base}/map-filters-meta`;
 
   let res: Response;
   try {

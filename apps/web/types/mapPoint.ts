@@ -15,6 +15,8 @@ export type MapPoint = {
   latitude: number;
   longitude: number;
   name?: string | null;
+  /** InPost directory status when backfilled on the point document. */
+  status?: string | null;
   validation_status?: string | null;
   formatted_address?: string | null;
   google_maps_uri?: string | null;

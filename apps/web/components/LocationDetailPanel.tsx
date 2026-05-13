@@ -3,12 +3,15 @@
 import { forwardRef } from "react";
 
 import { markerSvgSrc } from "@/lib/markerSvgSrc";
+import { inpostDetailStatusDotClassName } from "@/components/inpostStatusDot";
 import type { GoogleReviewSnippet, MapPoint } from "@/types/mapPoint";
 
 export type InpostPointItem = Record<string, unknown> | null;
 
 type LocationDetailPanelProps = {
   point: MapPoint;
+  /** When true, Google reviews list shows a loading state (lazy fetch). */
+  reviewsLoading?: boolean;
   inpostItem: InpostPointItem;
   inpostLoading: boolean;
   inpostError: string | null;
@@ -77,7 +80,7 @@ export const LocationDetailPanel = forwardRef<
   HTMLDivElement,
   LocationDetailPanelProps
 >(function LocationDetailPanel(
-  { point, inpostItem, inpostLoading, inpostError, onClose },
+  { point, reviewsLoading = false, inpostItem, inpostLoading, inpostError, onClose },
   ref
 ) {
   const title = point.name ?? point.inpost_point_id ?? "Location";
@@ -103,9 +106,6 @@ export const LocationDetailPanel = forwardRef<
   const showGoogleNumericRating =
     Number.isFinite(gr) && (gr > 0 || hasReviews);
   const liveStatus = inpostItem ? str(inpostItem.status) : null;
-  const statusNorm = liveStatus?.trim().toLowerCase() ?? "";
-  const isOperating = statusNorm === "operating";
-  const isCreated = statusNorm === "created";
   const statusLabel = inpostLoading
     ? "Loading…"
     : liveStatus ?? (inpostItem ? "Unknown" : "—");
@@ -123,7 +123,16 @@ export const LocationDetailPanel = forwardRef<
       aria-labelledby="location-detail-title"
       className="fixed bottom-0 left-0 top-[72px] z-30 flex w-full max-w-full flex-col border-r border-white/10 bg-neutral-950/98 text-neutral-100 shadow-2xl backdrop-blur-md md:max-w-md"
     >
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <button
+          type="button"
+          onClick={onClose}
+          className="pointer-events-auto absolute right-2 top-2 z-40 flex h-8 w-8 items-center justify-center rounded-md bg-black/55 text-base leading-none text-neutral-100 shadow-md ring-1 ring-white/15 backdrop-blur-sm transition hover:bg-black/70 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70"
+          aria-label="Close location details"
+        >
+          ✕
+        </button>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="relative h-[200px] max-h-[200px] w-full shrink-0 overflow-hidden bg-neutral-800">
           {inpostLoading && (
             <div className="absolute inset-0 animate-pulse bg-neutral-700/80" />
@@ -143,14 +152,6 @@ export const LocationDetailPanel = forwardRef<
               No image
             </div>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-black/55 text-base leading-none text-neutral-100 shadow-md ring-1 ring-white/15 backdrop-blur-sm transition hover:bg-black/70 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70"
-            aria-label="Close location details"
-          >
-            ✕
-          </button>
         </div>
 
         <div className="flex shrink-0 items-center gap-2.5 border-b border-white/10 px-3 pb-3 pt-3">
@@ -185,17 +186,10 @@ export const LocationDetailPanel = forwardRef<
               {statusLabel}
             </span>
             <span
-              className={
-                inpostLoading
-                  ? "h-3 w-3 shrink-0 rounded-full bg-neutral-500"
-                  : !liveStatus
-                    ? "h-3 w-3 shrink-0 rounded-full bg-neutral-500"
-                    : isOperating
-                      ? "h-3 w-3 shrink-0 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)] animate-pulse"
-                      : isCreated
-                        ? "h-3 w-3 shrink-0 rounded-full bg-orange-500 shadow-[0_0_10px_rgba(251,146,60,0.7)] animate-pulse"
-                        : "h-3 w-3 shrink-0 rounded-full bg-red-500"
-              }
+              className={inpostDetailStatusDotClassName(
+                inpostLoading,
+                liveStatus
+              )}
             />
           </div>
         </div>
@@ -262,7 +256,9 @@ export const LocationDetailPanel = forwardRef<
               <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
                 Google reviews
               </h3>
-              {googleReviews.length === 0 ? (
+              {reviewsLoading ? (
+                <p className="mt-2 text-sm text-neutral-500">Loading reviews…</p>
+              ) : googleReviews.length === 0 ? (
                 <p className="mt-2 text-sm text-neutral-500">
                   No review text stored for this point.
                 </p>
@@ -329,6 +325,7 @@ export const LocationDetailPanel = forwardRef<
             )}
           </section>
         </div>
+      </div>
       </div>
     </div>
   );

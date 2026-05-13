@@ -12,6 +12,10 @@ DEFAULT_SAMPLE_SIZE = 25
 DEFAULT_START_PAGE = 1
 DEFAULT_PER_PAGE = 1000
 DEFAULT_COUNTRY_CODE = "PL"
+COUNTRY_BOUNDING_BOXES: dict[str, tuple[float, float, float, float]] = {
+    # min_lat, min_lng, max_lat, max_lng
+    "PL": (49.0, 14.0, 55.1, 24.2),
+}
 
 DEFAULT_DATABASE_NAME = "inpost_assignment"
 DEFAULT_MONGO_COLLECTION = "inpost_point_google_places"

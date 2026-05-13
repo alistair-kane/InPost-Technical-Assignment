@@ -30,12 +30,14 @@ import {
   type SpotlightPresetId,
 } from "@/lib/mapSpotlightPresets";
 import { parseInpostNameAndCountry } from "@/lib/inpostPointQuery";
-import type { MapPoint } from "@/types/mapPoint";
+import type { GoogleReviewSnippet, MapPoint } from "@/types/mapPoint";
 import {
   buildMapPointsQueryString,
+  coalesceMapFiltersForm,
   emptyMapFiltersForm,
+  mergePartnerIdsForUi,
+  normalizeSelectedPartnersForUi,
   type MapFiltersForm,
-  uniquePartnerIdsFromPoints,
 } from "./mapFiltersQuery";
 
 export type { MapPoint } from "@/types/mapPoint";
@@ -51,6 +53,13 @@ const MAP_RESET_ZOOM_IN_THRESHOLD = 2;
 const MARKER_SIZE_PX = 40;
 const SELECTED_MARKER_Z_INDEX = 5_000_000;
 const DEFAULT_MARKER_Z_INDEX = 0;
+
+/** Padded viewport → API bbox (fraction of span added on each side). */
+const MAP_BBOX_PADDING = 0.14;
+/** After map `idle`, wait before calling `/api/map-points` (reduces spam while panning). */
+const MAP_POINTS_IDLE_DEBOUNCE_MS = 1000;
+/** Must match server default cap expectation for dashboard loads. */
+const MAP_MAX_POINTS = 100_000;
 
 /** Filters panel: `right-4` + `w-72` (288px) — horizontal space covered on the map. */
 const MAP_FILTER_OVERLAY_RESERVE_X = 16 + 288;
@@ -74,20 +83,42 @@ function isSameMapPoint(a: MapPoint, b: MapPoint | null): boolean {
   return a.latitude === b.latitude && a.longitude === b.longitude;
 }
 
-function countMapPointsInBounds(
-  pointList: MapPoint[],
-  bounds: google.maps.LatLngBounds | null | undefined
-): number {
-  if (bounds == null) {
-    return pointList.length;
+function mapPointKey(p: MapPoint): string {
+  const id =
+    p.inpost_point_id != null && String(p.inpost_point_id).length > 0
+      ? String(p.inpost_point_id)
+      : null;
+  return id ?? `${p.latitude}|${p.longitude}`;
+}
+
+function buildPaddedBboxSearchParams(
+  bounds: google.maps.LatLngBounds,
+  padFraction: number
+): URLSearchParams | null {
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  let minLat = sw.lat();
+  let maxLat = ne.lat();
+  let minLng = sw.lng();
+  let maxLng = ne.lng();
+  const latSpan = maxLat - minLat;
+  const lngSpan = maxLng - minLng;
+  const latPad = (latSpan > 1e-9 ? latSpan : 0.01) * padFraction;
+  const lngPad = (lngSpan > 1e-9 ? lngSpan : 0.01) * padFraction;
+  minLat = Math.max(-90, minLat - latPad);
+  maxLat = Math.min(90, maxLat + latPad);
+  minLng = Math.max(-180, minLng - lngPad);
+  maxLng = Math.min(180, maxLng + lngPad);
+  if (minLat > maxLat || minLng > maxLng) {
+    return null;
   }
-  let n = 0;
-  for (const p of pointList) {
-    if (bounds.contains({ lat: p.latitude, lng: p.longitude })) {
-      n++;
-    }
-  }
-  return n;
+  const sp = new URLSearchParams();
+  sp.set("min_lat", String(minLat));
+  sp.set("max_lat", String(maxLat));
+  sp.set("min_lng", String(minLng));
+  sp.set("max_lng", String(maxLng));
+  sp.set("max_points", String(MAP_MAX_POINTS));
+  return sp;
 }
 
 /** Marker cluster bubble — InPost greys / yellow (matches paczkomat SVG accents). */
@@ -249,6 +280,21 @@ function buildSvgMarkerContent(
   return wrapper;
 }
 
+const markerTemplateCache = new Map<string, HTMLElement>();
+
+function getMarkerContent(
+  partnerId: number | string | null | undefined,
+  selected: boolean
+): HTMLElement {
+  const key = `${partnerId ?? "_"}|${selected ? "s" : "n"}`;
+  let template = markerTemplateCache.get(key);
+  if (!template) {
+    template = buildSvgMarkerContent(partnerId, { selected });
+    markerTemplateCache.set(key, template);
+  }
+  return template.cloneNode(true) as HTMLElement;
+}
+
 const MAP_TYPE_SEGMENTS: { mapTypeId: string; label: string }[] = [
   { mapTypeId: "roadmap", label: "Map" },
   { mapTypeId: "satellite", label: "Satellite" },
@@ -387,7 +433,15 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 export default function MapDashboard() {
   const [points, setPoints] = useState<MapPoint[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filterForm, setFilterForm] = useState<MapFiltersForm>(emptyMapFiltersForm);
+  const [totalMatching, setTotalMatching] = useState<number | null>(null);
+  const [locationsInView, setLocationsInView] = useState(0);
+  const [detailReviews, setDetailReviews] = useState<GoogleReviewSnippet[] | null>(
+    null
+  );
+  const [detailReviewsLoading, setDetailReviewsLoading] = useState(false);
+  const [filterForm, setFilterForm] = useState<MapFiltersForm>(() =>
+    coalesceMapFiltersForm({})
+  );
   const debouncedMinRating = useDebouncedValue(filterForm.minRating, 260);
   const debouncedMaxRating = useDebouncedValue(filterForm.maxRating, 260);
   const debouncedReviewTimeMinIdx = useDebouncedValue(
@@ -405,6 +459,9 @@ export default function MapDashboard() {
       onlyWithoutGooglePlace: filterForm.onlyWithoutGooglePlace,
       reviewTimeMinIdx: debouncedReviewTimeMinIdx,
       reviewTimeMaxIdx: debouncedReviewTimeMaxIdx,
+      includeInpostStatusOperating: filterForm.includeInpostStatusOperating,
+      includeInpostStatusCreated: filterForm.includeInpostStatusCreated,
+      includeInpostStatusDisabled: filterForm.includeInpostStatusDisabled,
     }),
     [
       debouncedMinRating,
@@ -412,6 +469,9 @@ export default function MapDashboard() {
       debouncedReviewTimeMinIdx,
       debouncedReviewTimeMaxIdx,
       filterForm.onlyWithoutGooglePlace,
+      filterForm.includeInpostStatusOperating,
+      filterForm.includeInpostStatusCreated,
+      filterForm.includeInpostStatusDisabled,
     ]
   );
   const [partnerOptions, setPartnerOptions] = useState<number[]>([]);
@@ -433,6 +493,10 @@ export default function MapDashboard() {
   const locationPanelRef = useRef<HTMLDivElement | null>(null);
   const mapPanDxRef = useRef(0);
   const prevSelectedRef = useRef<MapPoint | null>(null);
+  const prevSelectedMarkerRef = useRef<MapPoint | null>(null);
+  const markersByKeyRef = useRef<
+    Map<string, google.maps.marker.AdvancedMarkerElement>
+  >(new Map());
   const [activeSpotlight, setActiveSpotlight] = useState<SpotlightPresetId | null>(
     null
   );
@@ -498,7 +562,213 @@ export default function MapDashboard() {
     [queryFilterForm, partnerOptions, selectedPartners]
   );
 
-  const [locationsInView, setLocationsInView] = useState(0);
+  const mapPointsQueryStringRef = useRef(mapPointsQueryString);
+  mapPointsQueryStringRef.current = mapPointsQueryString;
+
+  useEffect(() => {
+    let cancelled = false;
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const path =
+          mapPointsQueryString === ""
+            ? "/api/map-filters-meta"
+            : `/api/map-filters-meta?${mapPointsQueryString}`;
+        const res = await fetch(path, { signal: ac.signal });
+        const data = (await res.json().catch(() => ({}))) as {
+          partner_ids?: unknown;
+        };
+        if (!res.ok || cancelled) {
+          return;
+        }
+        const raw = data.partner_ids;
+        if (Array.isArray(raw)) {
+          const ids: number[] = [];
+          for (const x of raw) {
+            const n = typeof x === "number" ? x : Number(x);
+            if (Number.isFinite(n)) {
+              ids.push(n);
+            }
+          }
+          setPartnerOptions(mergePartnerIdsForUi(ids));
+        }
+      } catch (e) {
+        if ((e as Error).name === "AbortError") {
+          return;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [mapPointsQueryString]);
+
+  useEffect(() => {
+    setSelectedPartners((prev) =>
+      normalizeSelectedPartnersForUi(prev, partnerOptions)
+    );
+  }, [partnerOptions]);
+
+  useEffect(() => {
+    if (!map) {
+      return;
+    }
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    const fetchAbortRef = { current: null as AbortController | null };
+
+    const runFetch = () => {
+      const bounds = map.getBounds();
+      if (!bounds) {
+        return;
+      }
+      const bboxParams = buildPaddedBboxSearchParams(bounds, MAP_BBOX_PADDING);
+      if (!bboxParams) {
+        return;
+      }
+      fetchAbortRef.current?.abort();
+      const ac = new AbortController();
+      fetchAbortRef.current = ac;
+
+      const filterQs = mapPointsQueryStringRef.current;
+      const merged = new URLSearchParams(filterQs);
+      for (const [k, v] of bboxParams.entries()) {
+        merged.set(k, v);
+      }
+      const path = `/api/map-points?${merged.toString()}`;
+
+      void (async () => {
+        try {
+          const res = await fetch(path, { signal: ac.signal });
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+            points?: unknown;
+            total_matching?: unknown;
+            in_bbox_matching?: unknown;
+          };
+          if (ac.signal.aborted || cancelled) {
+            return;
+          }
+          if (!res.ok) {
+            const msg =
+              typeof data.error === "string"
+                ? data.error
+                : res.status === 413
+                  ? "Too many locations in this view; zoom in or narrow filters."
+                  : "Failed to load points";
+            setLoadError(msg);
+            if (res.status === 413) {
+              setPoints([]);
+              if (typeof data.in_bbox_matching === "number") {
+                setLocationsInView(data.in_bbox_matching);
+              } else {
+                setLocationsInView(0);
+              }
+            }
+            return;
+          }
+          const list = Array.isArray(data.points) ? data.points : [];
+          setPoints(list as MapPoint[]);
+          setLoadError(null);
+          if (typeof data.total_matching === "number") {
+            setTotalMatching(data.total_matching);
+          }
+          if (typeof data.in_bbox_matching === "number") {
+            setLocationsInView(data.in_bbox_matching);
+          }
+        } catch (e) {
+          if ((e as Error).name === "AbortError") {
+            return;
+          }
+          if (!cancelled) {
+            setLoadError("Failed to load points");
+          }
+        }
+      })();
+    };
+
+    const schedule = () => {
+      if (debounceTimer != null) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        runFetch();
+      }, MAP_POINTS_IDLE_DEBOUNCE_MS);
+    };
+
+    const idleListener = map.addListener("idle", schedule);
+    schedule();
+
+    return () => {
+      cancelled = true;
+      fetchAbortRef.current?.abort();
+      google.maps.event.removeListener(idleListener);
+      if (debounceTimer != null) {
+        clearTimeout(debounceTimer);
+      }
+    };
+  }, [map, mapPointsQueryString]);
+
+  useLayoutEffect(() => {
+    if (!selected?.inpost_point_id || String(selected.inpost_point_id).length === 0) {
+      setDetailReviews(null);
+      setDetailReviewsLoading(false);
+      return;
+    }
+    setDetailReviewsLoading(true);
+    setDetailReviews(null);
+  }, [selected?.inpost_point_id]);
+
+  useEffect(() => {
+    const id = selected?.inpost_point_id;
+    if (id == null || String(id).length === 0) {
+      return;
+    }
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/map-point?inpost_point_id=${encodeURIComponent(String(id))}`,
+          { signal: ac.signal }
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          google_reviews?: unknown;
+        };
+        if (ac.signal.aborted) {
+          return;
+        }
+        if (!res.ok) {
+          setDetailReviews([]);
+          return;
+        }
+        const raw = data.google_reviews;
+        setDetailReviews(
+          Array.isArray(raw) ? (raw as GoogleReviewSnippet[]) : []
+        );
+      } catch (e) {
+        if ((e as Error).name !== "AbortError" && !ac.signal.aborted) {
+          setDetailReviews([]);
+        }
+      } finally {
+        if (!ac.signal.aborted) {
+          setDetailReviewsLoading(false);
+        }
+      }
+    })();
+    return () => ac.abort();
+  }, [selected]);
+
+  const detailPoint = useMemo((): MapPoint | null => {
+    if (!selected) {
+      return null;
+    }
+    if (detailReviewsLoading) {
+      return { ...selected, google_reviews: undefined };
+    }
+    return { ...selected, google_reviews: detailReviews ?? [] };
+  }, [selected, detailReviews, detailReviewsLoading]);
 
   const onPartnerToggle = useCallback((id: number) => {
     setSelectedPartners((prev) => {
@@ -553,70 +823,14 @@ export default function MapDashboard() {
       if (map) {
         requestAnimationFrame(() => {
           const z = map.getZoom() ?? 8;
-          if (z < 13) {
-            map.setZoom(13);
+          if (z < 18) {
+            map.setZoom(18);
           }
         });
       }
     },
     [points, map, activeSpotlight, showSpotlightToast]
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const path =
-          mapPointsQueryString === ""
-            ? "/api/map-points"
-            : `/api/map-points?${mapPointsQueryString}`;
-        const res = await fetch(path, { signal: ac.signal });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const msg =
-            typeof data.error === "string" ? data.error : "Failed to load points";
-          if (!cancelled) setLoadError(msg);
-          return;
-        }
-        const list = Array.isArray(data.points) ? data.points : [];
-        if (!cancelled) {
-          setPartnerOptions((prev) => {
-            const fromList = uniquePartnerIdsFromPoints(list);
-            const merged = new Set([...prev, ...fromList]);
-            return [...merged].sort((a, b) => a - b);
-          });
-          setPoints(list);
-          setLoadError(null);
-        }
-      } catch (e) {
-        if ((e as Error).name === "AbortError") {
-          return;
-        }
-        if (!cancelled) setLoadError("Failed to load points");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [mapPointsQueryString]);
-
-  useLayoutEffect(() => {
-    if (!map || points === null) {
-      return;
-    }
-    const sync = () => {
-      setLocationsInView(countMapPointsInBounds(points, map.getBounds()));
-    };
-    sync();
-    const idleListener = map.addListener("idle", sync);
-    const boundsListener = map.addListener("bounds_changed", sync);
-    return () => {
-      google.maps.event.removeListener(idleListener);
-      google.maps.event.removeListener(boundsListener);
-    };
-  }, [map, points]);
 
   useEffect(() => {
     if (!selected) {
@@ -788,6 +1002,8 @@ export default function MapDashboard() {
     }
     map.panTo({ lat: b.lat, lng: b.lng });
     map.setZoom(b.zoom);
+    setActiveSpotlight(null);
+    setSelected(null);
   }, [map]);
 
   useEffect(() => {
@@ -840,6 +1056,8 @@ export default function MapDashboard() {
 
     clustererRef.current?.clearMarkers();
     clustererRef.current = null;
+    const markerLookup = markersByKeyRef.current;
+    markerLookup.clear();
 
     if (markersData.length === 0) {
       return;
@@ -856,18 +1074,14 @@ export default function MapDashboard() {
     }> = [];
 
     const markers: ClusterMarker[] = markersData.map((p) => {
-      const pinSelected = isSameMapPoint(p, selected);
-      const content = buildSvgMarkerContent(p.partner_id, {
-        selected: pinSelected,
-      });
+      const content = getMarkerContent(p.partner_id, false);
       const marker = new markerLib.AdvancedMarkerElement({
-        map,
         position: { lat: p.latitude, lng: p.longitude },
         content,
         title: p.name ?? p.inpost_point_id ?? "Point",
         gmpClickable: true,
         collisionBehavior: google.maps.CollisionBehavior.REQUIRED,
-        zIndex: pinSelected ? SELECTED_MARKER_Z_INDEX : DEFAULT_MARKER_Z_INDEX,
+        zIndex: DEFAULT_MARKER_Z_INDEX,
       });
       const onGmpClick: EventListener = () => {
         setActiveSpotlight(null);
@@ -875,6 +1089,7 @@ export default function MapDashboard() {
       };
       marker.addEventListener("gmp-click", onGmpClick);
       markerEntries.push({ marker, onGmpClick });
+      markerLookup.set(mapPointKey(p), marker);
       return marker;
     });
 
@@ -882,7 +1097,7 @@ export default function MapDashboard() {
       markers,
       map,
       algorithm: new SuperClusterAlgorithm({
-        radius: 300, maxZoom: 12,
+        radius: 240, maxZoom: 16,
       }),
       renderer: inPostClusterRenderer,
     });
@@ -894,8 +1109,29 @@ export default function MapDashboard() {
         m.removeEventListener("gmp-click", onGmpClick);
         MarkerUtils.setMap(m, null);
       });
+      markerLookup.clear();
     };
-  }, [map, isLoaded, markerLibReady, scriptError, markersData, selected]);
+  }, [map, isLoaded, markerLibReady, scriptError, markersData]);
+
+  useEffect(() => {
+    const lookup = markersByKeyRef.current;
+    const prev = prevSelectedMarkerRef.current;
+    if (prev && (!selected || !isSameMapPoint(prev, selected))) {
+      const marker = lookup.get(mapPointKey(prev));
+      if (marker) {
+        marker.content = getMarkerContent(prev.partner_id, false);
+        marker.zIndex = DEFAULT_MARKER_Z_INDEX;
+      }
+    }
+    if (selected) {
+      const marker = lookup.get(mapPointKey(selected));
+      if (marker) {
+        marker.content = getMarkerContent(selected.partner_id, true);
+        marker.zIndex = SELECTED_MARKER_Z_INDEX;
+      }
+    }
+    prevSelectedMarkerRef.current = selected;
+  }, [markersData, selected]);
 
   if (!apiKey) {
     return (
@@ -928,17 +1164,21 @@ export default function MapDashboard() {
     );
   }
 
-  const headerCountSubtitle =
-    points === null && !loadError
-      ? "Loading points…"
-      : points === null
-        ? ""
-        : (() => {
-            const total = points.length;
-            const inView = map != null ? locationsInView : total;
-            const inLabel = inView === 1 ? "location" : "locations";
-            return `Viewing ${inView} ${inLabel} out of ${total}`;
-          })();
+  /** Same predicate as map overlay while bbox points are in flight (header: "Loading points…"). */
+  const loadingMapPoints = points === null && !loadError;
+
+  const headerCountSubtitle = loadingMapPoints
+    ? "Loading points…"
+    : points === null
+      ? ""
+      : (() => {
+          const globalTotal = totalMatching ?? points.length;
+          const inView = locationsInView;
+          const inLabel = inView === 1 ? "location" : "locations";
+          return `Viewing ${inView} ${inLabel} out of ${globalTotal}`;
+        })();
+
+  const showMapPointsLoadingOverlay = isLoaded && loadingMapPoints;
 
   return (
     <div className="relative h-screen w-screen bg-neutral-900">
@@ -1013,23 +1253,11 @@ export default function MapDashboard() {
           </div>
         </div>
       </header>
-      {showResetMapView && (
-        <div className="pointer-events-none absolute left-1/2 top-[5.25rem] z-[21] flex -translate-x-1/2 justify-center px-3">
-          <button
-            type="button"
-            onClick={handleResetMapView}
-            aria-label="Reset map zoom and position to initial view"
-            className="pointer-events-auto rounded-md border border-white/15 bg-neutral-950/90 px-3 py-2 text-sm font-medium text-neutral-100 shadow-lg backdrop-blur transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 hover:border-amber-500/35 hover:bg-neutral-900/95"
-          >
-            Reset view
-          </button>
-        </div>
-      )}
       <div className="absolute right-4 top-20 z-20 max-w-[calc(100vw-1rem)]">
         <MapFiltersPanel
           form={filterForm}
           onFormChange={(patch) =>
-            setFilterForm((f) => ({ ...f, ...patch }))
+            setFilterForm((f) => coalesceMapFiltersForm({ ...f, ...patch }))
           }
           onResetFilters={() => {
             setFilterForm(emptyMapFiltersForm());
@@ -1040,7 +1268,7 @@ export default function MapDashboard() {
           onPartnerToggle={onPartnerToggle}
         />
       </div>
-      {selected && (
+      {selected && detailPoint && (
         <>
           <button
             type="button"
@@ -1053,7 +1281,8 @@ export default function MapDashboard() {
           />
           <LocationDetailPanel
             ref={locationPanelRef}
-            point={selected}
+            point={detailPoint}
+            reviewsLoading={detailReviewsLoading}
             inpostItem={inpostItem}
             inpostLoading={inpostLoading}
             inpostError={inpostError}
@@ -1086,19 +1315,52 @@ export default function MapDashboard() {
       ) : (
         <div aria-hidden style={mapContainerStyle} />
       )}
+      {showMapPointsLoadingOverlay && (
+        <div className="pointer-events-none absolute left-0 right-0 top-16 bottom-0 z-[15] flex items-center justify-center bg-neutral-950/35">
+          <div
+            className="motion-safe:animate-pulse flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-neutral-950/80 px-5 py-4 shadow-lg backdrop-blur"
+            role="status"
+            aria-live="polite"
+          >
+            <MasMascot size={60} />
+            <p className="text-sm text-neutral-300">Loading points…</p>
+          </div>
+        </div>
+      )}
       {spotlightToast && (
         <div
-          className="absolute bottom-32 left-1/2 z-[35] max-w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-amber-800/50 bg-amber-950/95 px-3 py-2 text-sm text-amber-100 shadow-lg backdrop-blur"
+          className="absolute bottom-44 left-1/2 z-[35] max-w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-md border border-amber-800/50 bg-amber-950/95 px-3 py-2 text-sm text-amber-100 shadow-lg backdrop-blur"
           role="status"
         >
           {spotlightToast}
         </div>
       )}
-      <MapSpotlightBar
-        active={activeSpotlight}
-        onSelect={handleSpotlightSelect}
-        poolEmpty={points === null || points.length === 0}
-      />
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-[21] flex flex-col items-center gap-2 px-3 pb-[max(0.25rem,env(safe-area-inset-bottom,0px))]">
+        {showResetMapView && (
+          <button
+            type="button"
+            onClick={handleResetMapView}
+            aria-label="Reset map zoom and position to initial view"
+            className="pointer-events-auto flex items-center gap-2 rounded-md border border-white/15 bg-neutral-950/90 px-3 py-2 text-sm font-medium text-neutral-100 shadow-lg backdrop-blur transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 hover:border-amber-500/35 hover:bg-neutral-900/95"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- local /public SVG asset */}
+            <img
+              src="/reset-zoom.svg"
+              alt=""
+              width={29}
+              height={29}
+              draggable={false}
+              className="pointer-events-none block h-[29px] w-[29px] shrink-0 object-contain object-center invert"
+            />
+            Reset map
+          </button>
+        )}
+        <MapSpotlightBar
+          active={activeSpotlight}
+          onSelect={handleSpotlightSelect}
+          poolEmpty={points === null || points.length === 0}
+        />
+      </div>
     </div>
   );
 }
