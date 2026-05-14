@@ -18,9 +18,9 @@ export const MAP_POINTS_IDLE_DEBOUNCE_MS = 1000;
 export const MAP_MAX_POINTS = 100_000;
 
 /** Target zoom when a spotlight preset selects a point (full-map → street context). */
-export const SPOTLIGHT_FOCUS_ZOOM = 18;
+export const SPOTLIGHT_FOCUS_ZOOM = 13;
 /** Delay between integer zoom steps for spotlight smooth zoom (Maps API has no fractional zoom). */
-export const SPOTLIGHT_ZOOM_STEP_MS = 180;
+export const SPOTLIGHT_ZOOM_STEP_MS = 120;
 
 /** Filters panel: `right-4` + `w-72` (288px) — horizontal space covered on the map. */
 export const MAP_FILTER_OVERLAY_RESERVE_X = 16 + 288;

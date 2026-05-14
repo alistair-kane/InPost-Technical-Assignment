@@ -3,12 +3,6 @@
 import Image from "next/image";
 import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
 import {
-  MarkerClusterer,
-  MarkerUtils,
-  SuperClusterAlgorithm,
-  type Marker as ClusterMarker,
-} from "@googlemaps/markerclusterer";
-import {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -17,7 +11,7 @@ import {
   useState,
 } from "react";
 
-import { LocationDetailPanel, type InpostPointItem } from "./LocationDetailPanel";
+import { LocationDetailPanel } from "./LocationDetailPanel";
 import { MasMascot } from "./MasMascot";
 import { MapFiltersPanel } from "./MapFiltersPanel";
 import { MapSpotlightBar } from "./MapSpotlightBar";
@@ -26,113 +20,44 @@ import {
   SPOTLIGHT_EMPTY_HINTS,
   type SpotlightPresetId,
 } from "@/lib/mapSpotlightPresets";
-import { parseInpostNameAndCountry } from "@/lib/inpostPointQuery";
-import type {
-  GoogleReviewSnippet,
-  MapPoint,
-  MapPointDetailOverlay,
-} from "@/types/mapPoint";
-import {
-  buildMapPointsQueryString,
-  coalesceMapFiltersForm,
-  emptyMapFiltersForm,
-  mergePartnerIdsForUi,
-  normalizeSelectedPartnersForUi,
-  type MapFiltersForm,
-} from "./mapFiltersQuery";
+import type { MapPoint } from "@/types/mapPoint";
 import { attachGoogleStyleMapTypeBar } from "./mapDashboard/attachMapTypeBar";
 import {
   defaultCenter,
   defaultZoom,
-  MAP_BBOX_PADDING,
   MAP_FILTER_OVERLAY_RESERVE_X,
   MAP_FILTERS_HOST_TOP_REM,
-  MAP_POINTS_IDLE_DEBOUNCE_MS,
   MAP_RESET_ZOOM_IN_THRESHOLD,
-  SELECTED_MARKER_Z_INDEX,
-  DEFAULT_MARKER_Z_INDEX,
   SPOTLIGHT_FOCUS_ZOOM,
   mapContainerStyle,
 } from "./mapDashboard/mapDashboardConstants";
-import { getMarkerContent, inPostClusterRenderer } from "./mapDashboard/markerClusterContent";
-import {
-  buildPaddedBboxSearchParams,
-  isSameMapPoint,
-  mapPointKey,
-} from "./mapDashboard/mapPointGeo";
-import {
-  clearMapPointsFetchPipeline,
-  type MapPointsRefreshReason,
-} from "./mapDashboard/mapPointsRefresh";
+import { computeLocationPanelPanOffsetPx } from "./mapDashboard/mapPanelPan";
+import { isSameMapPoint } from "./mapDashboard/mapPointGeo";
 import {
   cancelSpotlightZoomInterval,
   startSpotlightSmoothZoom,
 } from "./mapDashboard/spotlightSmoothZoom";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useInpostPointLookup } from "@/hooks/useInpostPointLookup";
+import { useMapFiltersQuery } from "@/hooks/useMapFiltersQuery";
+import { useMapMarkerCluster } from "@/hooks/useMapMarkerCluster";
+import { useMapPointDetail } from "@/hooks/useMapPointDetail";
+import { useMapPointsFetch } from "@/hooks/useMapPointsFetch";
 
 export type { MapPoint } from "@/types/mapPoint";
 
 export default function MapDashboard() {
-  const [points, setPoints] = useState<MapPoint[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [totalMatching, setTotalMatching] = useState<number | null>(null);
-  const [locationsInView, setLocationsInView] = useState(0);
-  const [detailReviews, setDetailReviews] = useState<GoogleReviewSnippet[] | null>(
-    null
-  );
-  const [detailReviewsLoading, setDetailReviewsLoading] = useState(false);
-  const [detailOverlay, setDetailOverlay] = useState<MapPointDetailOverlay | null>(
-    null
-  );
-  const [filterForm, setFilterForm] = useState<MapFiltersForm>(() =>
-    coalesceMapFiltersForm({})
-  );
-  const debouncedMinRating = useDebouncedValue(filterForm.minRating, 260);
-  const debouncedMaxRating = useDebouncedValue(filterForm.maxRating, 260);
-  const debouncedReviewTimeMinIdx = useDebouncedValue(
-    filterForm.reviewTimeMinIdx,
-    260
-  );
-  const debouncedReviewTimeMaxIdx = useDebouncedValue(
-    filterForm.reviewTimeMaxIdx,
-    260
-  );
-  const debouncedGoogleMapsProximityRadiusM = useDebouncedValue(
-    filterForm.googleMapsProximityRadiusM,
-    260
-  );
-  const queryFilterForm = useMemo(
-    (): MapFiltersForm => ({
-      minRating: debouncedMinRating,
-      maxRating: debouncedMaxRating,
-      googleMapsProximityRadiusM: debouncedGoogleMapsProximityRadiusM,
-      onlyWithoutGooglePlace: filterForm.onlyWithoutGooglePlace,
-      reviewTimeMinIdx: debouncedReviewTimeMinIdx,
-      reviewTimeMaxIdx: debouncedReviewTimeMaxIdx,
-      includeInpostStatusOperating: filterForm.includeInpostStatusOperating,
-      includeInpostStatusCreated: filterForm.includeInpostStatusCreated,
-      includeInpostStatusDisabled: filterForm.includeInpostStatusDisabled,
-    }),
-    [
-      debouncedMinRating,
-      debouncedMaxRating,
-      debouncedReviewTimeMinIdx,
-      debouncedReviewTimeMaxIdx,
-      debouncedGoogleMapsProximityRadiusM,
-      filterForm.onlyWithoutGooglePlace,
-      filterForm.includeInpostStatusOperating,
-      filterForm.includeInpostStatusCreated,
-      filterForm.includeInpostStatusDisabled,
-    ]
-  );
-  const [partnerOptions, setPartnerOptions] = useState<number[]>([]);
-  const [selectedPartners, setSelectedPartners] = useState<Set<number>>(
-    () => new Set()
-  );
+  const {
+    filterForm,
+    applyFilterPatch,
+    partnerOptions,
+    selectedPartners,
+    mapPointsQueryString,
+    onPartnerToggle,
+    resetFiltersToEmpty,
+  } = useMapFiltersQuery();
   const [selected, setSelected] = useState<MapPoint | null>(null);
-  const [inpostItem, setInpostItem] = useState<InpostPointItem>(null);
-  const [inpostLoading, setInpostLoading] = useState(false);
-  const [inpostError, setInpostError] = useState<string | null>(null);
+  const { detailPoint, detailReviewsLoading } = useMapPointDetail(selected);
+  const { inpostItem, inpostLoading, inpostError } = useInpostPointLookup(selected);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const spotlightZoomIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -140,28 +65,15 @@ export default function MapDashboard() {
   );
   /** When true, map ``idle`` must not schedule bbox ``/api/map-points`` fetches (stepped spotlight zoom). */
   const spotlightZoomAnimatingRef = useRef(false);
-  /** Latest bbox fetch from the map-idle effect (one shot after spotlight zoom completes). */
-  const runMapPointsFetchRef = useRef<(() => void) | null>(null);
-  /** Pending ``idle`` debounce for ``/api/map-points`` (cleared after spotlight zoom fetch). */
-  const mapPointsDebounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
-  /** Abort the bbox ``/api/map-points`` request (e.g. before resetting camera so stale rows are not applied). */
-  const abortInFlightMapPointsFetchRef = useRef<(() => void) | null>(null);
   const [mapDarkMode, setMapDarkMode] = useState(false);
   /** Camera passed into `GoogleMap` when basemap remounts (colorScheme only applies at init). */
   const [mapBootCenter, setMapBootCenter] = useState(defaultCenter);
   const [mapBootZoom, setMapBootZoom] = useState(defaultZoom);
   const [markerLibReady, setMarkerLibReady] = useState(false);
-  const clustererRef = useRef<MarkerClusterer | null>(null);
   const mapTypeBarCleanupRef = useRef<(() => void) | null>(null);
   const locationPanelRef = useRef<HTMLDivElement | null>(null);
   const mapPanDxRef = useRef(0);
   const prevSelectedRef = useRef<MapPoint | null>(null);
-  const prevSelectedMarkerRef = useRef<MapPoint | null>(null);
-  const markersByKeyRef = useRef<
-    Map<string, google.maps.marker.AdvancedMarkerElement>
-  >(new Map());
   const [activeSpotlight, setActiveSpotlight] = useState<SpotlightPresetId | null>(
     null
   );
@@ -221,284 +133,14 @@ export default function MapDashboard() {
     };
   }, [isLoaded, scriptError]);
 
-  const mapPointsQueryString = useMemo(
-    () =>
-      buildMapPointsQueryString(
-        queryFilterForm,
-        partnerOptions,
-        selectedPartners
-      ),
-    [queryFilterForm, partnerOptions, selectedPartners]
-  );
-
-  const mapPointsQueryStringRef = useRef(mapPointsQueryString);
-  mapPointsQueryStringRef.current = mapPointsQueryString;
-
-  useEffect(() => {
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const path =
-          mapPointsQueryString === ""
-            ? "/api/map-filters-meta"
-            : `/api/map-filters-meta?${mapPointsQueryString}`;
-        const res = await fetch(path, { signal: ac.signal });
-        const data = (await res.json().catch(() => ({}))) as {
-          partner_ids?: unknown;
-        };
-        if (!res.ok || cancelled) {
-          return;
-        }
-        const raw = data.partner_ids;
-        if (Array.isArray(raw)) {
-          const ids: number[] = [];
-          for (const x of raw) {
-            const n = typeof x === "number" ? x : Number(x);
-            if (Number.isFinite(n)) {
-              ids.push(n);
-            }
-          }
-          setPartnerOptions(mergePartnerIdsForUi(ids));
-        }
-      } catch (e) {
-        if ((e as Error).name === "AbortError") {
-          return;
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [mapPointsQueryString]);
-
-  useEffect(() => {
-    setSelectedPartners((prev) =>
-      normalizeSelectedPartnersForUi(prev, partnerOptions)
-    );
-  }, [partnerOptions]);
-
-  useEffect(() => {
-    if (!map) {
-      return;
-    }
-    let cancelled = false;
-    const fetchAbortRef = { current: null as AbortController | null };
-    abortInFlightMapPointsFetchRef.current = () => {
-      fetchAbortRef.current?.abort();
-    };
-
-    const runFetch = () => {
-      const bounds = map.getBounds();
-      if (!bounds) {
-        return;
-      }
-      const bboxParams = buildPaddedBboxSearchParams(bounds, MAP_BBOX_PADDING);
-      if (!bboxParams) {
-        return;
-      }
-      fetchAbortRef.current?.abort();
-      const ac = new AbortController();
-      fetchAbortRef.current = ac;
-
-      const filterQs = mapPointsQueryStringRef.current;
-      const merged = new URLSearchParams(filterQs);
-      for (const [k, v] of bboxParams.entries()) {
-        merged.set(k, v);
-      }
-      const path = `/api/map-points?${merged.toString()}`;
-
-      void (async () => {
-        try {
-          const res = await fetch(path, { signal: ac.signal });
-          const data = (await res.json().catch(() => ({}))) as {
-            error?: string;
-            points?: unknown;
-            total_matching?: unknown;
-            in_bbox_matching?: unknown;
-          };
-          if (ac.signal.aborted || cancelled) {
-            return;
-          }
-          if (!res.ok) {
-            const msg =
-              typeof data.error === "string"
-                ? data.error
-                : res.status === 413
-                  ? "Too many locations in this view; zoom in or narrow filters."
-                  : "Failed to load points";
-            setLoadError(msg);
-            if (res.status === 413) {
-              setPoints([]);
-              if (typeof data.in_bbox_matching === "number") {
-                setLocationsInView(data.in_bbox_matching);
-              } else {
-                setLocationsInView(0);
-              }
-            }
-            return;
-          }
-          const list = Array.isArray(data.points) ? data.points : [];
-          setPoints(list as MapPoint[]);
-          setLoadError(null);
-          if (typeof data.total_matching === "number") {
-            setTotalMatching(data.total_matching);
-          }
-          if (typeof data.in_bbox_matching === "number") {
-            setLocationsInView(data.in_bbox_matching);
-          }
-        } catch (e) {
-          if ((e as Error).name === "AbortError") {
-            return;
-          }
-          if (!cancelled) {
-            setLoadError("Failed to load points");
-          }
-        }
-      })();
-    };
-
-    runMapPointsFetchRef.current = runFetch;
-
-    const schedule = () => {
-      if (spotlightZoomAnimatingRef.current) {
-        if (mapPointsDebounceTimerRef.current != null) {
-          clearTimeout(mapPointsDebounceTimerRef.current);
-          mapPointsDebounceTimerRef.current = null;
-        }
-        return;
-      }
-      if (mapPointsDebounceTimerRef.current != null) {
-        clearTimeout(mapPointsDebounceTimerRef.current);
-      }
-      mapPointsDebounceTimerRef.current = setTimeout(() => {
-        mapPointsDebounceTimerRef.current = null;
-        runFetch();
-      }, MAP_POINTS_IDLE_DEBOUNCE_MS);
-    };
-
-    const idleListener = map.addListener("idle", schedule);
-    schedule();
-
-    return () => {
-      cancelled = true;
-      clearMapPointsFetchPipeline(
-        abortInFlightMapPointsFetchRef,
-        mapPointsDebounceTimerRef
-      );
-      abortInFlightMapPointsFetchRef.current = null;
-      google.maps.event.removeListener(idleListener);
-      runMapPointsFetchRef.current = null;
-    };
-  }, [map, mapPointsQueryString]);
-
-  useLayoutEffect(() => {
-    if (!selected?.inpost_point_id || String(selected.inpost_point_id).length === 0) {
-      setDetailReviews(null);
-      setDetailReviewsLoading(false);
-      setDetailOverlay(null);
-      return;
-    }
-    setDetailReviewsLoading(true);
-    setDetailReviews(null);
-    setDetailOverlay(null);
-  }, [selected?.inpost_point_id]);
-
-  useEffect(() => {
-    const id = selected?.inpost_point_id;
-    if (id == null || String(id).length === 0) {
-      return;
-    }
-    const ac = new AbortController();
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/map-point?inpost_point_id=${encodeURIComponent(String(id))}`,
-          { signal: ac.signal }
-        );
-        const data = (await res.json().catch(() => ({}))) as Record<
-          string,
-          unknown
-        >;
-        if (ac.signal.aborted) {
-          return;
-        }
-        if (!res.ok) {
-          setDetailReviews([]);
-          setDetailOverlay(null);
-          return;
-        }
-        const raw = data.google_reviews;
-        setDetailReviews(
-          Array.isArray(raw) ? (raw as GoogleReviewSnippet[]) : []
-        );
-        const strOrNull = (v: unknown): string | null => {
-          if (v == null) {
-            return null;
-          }
-          if (typeof v !== "string") {
-            return null;
-          }
-          const s = v.trim();
-          return s.length > 0 ? s : null;
-        };
-        setDetailOverlay({
-          formatted_address: strOrNull(data.formatted_address),
-          google_maps_uri: strOrNull(data.google_maps_uri),
-          status: strOrNull(data.status),
-          validation_status: strOrNull(data.validation_status),
-        });
-      } catch (e) {
-        if ((e as Error).name !== "AbortError" && !ac.signal.aborted) {
-          setDetailReviews([]);
-          setDetailOverlay(null);
-        }
-      } finally {
-        if (!ac.signal.aborted) {
-          setDetailReviewsLoading(false);
-        }
-      }
-    })();
-    return () => ac.abort();
-  }, [selected]);
-
-  const detailPoint = useMemo((): MapPoint | null => {
-    if (!selected) {
-      return null;
-    }
-    const merged: MapPoint = {
-      ...selected,
-      ...(detailOverlay ?? {}),
-    };
-    if (detailReviewsLoading) {
-      return { ...merged, google_reviews: undefined };
-    }
-    return { ...merged, google_reviews: detailReviews ?? [] };
-  }, [selected, detailOverlay, detailReviews, detailReviewsLoading]);
-
-  const onPartnerToggle = useCallback((id: number) => {
-    setSelectedPartners((prev) => {
-      const allIds = partnerOptions;
-      if (allIds.length === 0) {
-        return prev;
-      }
-      const effective =
-        prev.size === 0 ? new Set(allIds) : new Set(prev);
-      if (effective.has(id)) {
-        effective.delete(id);
-      } else {
-        effective.add(id);
-      }
-      if (
-        effective.size === 0 ||
-        effective.size === allIds.length
-      ) {
-        return new Set<number>();
-      }
-      return effective;
-    });
-  }, [partnerOptions]);
+  const {
+    points,
+    loadError,
+    totalMatching,
+    locationsInView,
+    beginMapPointsRefresh,
+    flushMapPointsAfterSpotlightZoom,
+  } = useMapPointsFetch(map, mapPointsQueryString, spotlightZoomAnimatingRef);
 
   const showSpotlightToast = useCallback((message: string) => {
     setSpotlightToast(message);
@@ -543,64 +185,6 @@ export default function MapDashboard() {
     [points, activeSpotlight, showSpotlightToast]
   );
 
-  useEffect(() => {
-    if (!selected) {
-      setInpostItem(null);
-      setInpostLoading(false);
-      setInpostError(null);
-      return;
-    }
-    const { name, country } = parseInpostNameAndCountry(selected);
-    if (!name) {
-      setInpostItem(null);
-      setInpostLoading(false);
-      setInpostError(null);
-      return;
-    }
-    const ac = new AbortController();
-    setInpostLoading(true);
-    setInpostError(null);
-    setInpostItem(null);
-    const qs = new URLSearchParams({
-      name,
-      country,
-    });
-    void (async () => {
-      try {
-        const res = await fetch(`/api/inpost-point?${qs.toString()}`, {
-          signal: ac.signal,
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          item?: InpostPointItem;
-          error?: string;
-        };
-        if (ac.signal.aborted) {
-          return;
-        }
-        if (!res.ok) {
-          setInpostError(
-            typeof data.error === "string" ? data.error : "InPost lookup failed"
-          );
-          setInpostItem(null);
-          return;
-        }
-        setInpostError(null);
-        setInpostItem(data.item ?? null);
-      } catch (e) {
-        if ((e as Error).name === "AbortError") {
-          return;
-        }
-        setInpostError("InPost lookup failed");
-        setInpostItem(null);
-      } finally {
-        if (!ac.signal.aborted) {
-          setInpostLoading(false);
-        }
-      }
-    })();
-    return () => ac.abort();
-  }, [selected]);
-
   useLayoutEffect(() => {
     if (!map || !isLoaded || typeof google === "undefined") {
       cancelSpotlightZoomInterval(
@@ -630,22 +214,20 @@ export default function MapDashboard() {
         }
         const panelEl = locationPanelRef.current;
         const mapDiv = m.getDiv();
-        const panelW = panelEl?.getBoundingClientRect().width ?? panelEl?.offsetWidth ?? 448;
+        const panelW =
+          panelEl?.getBoundingClientRect().width ??
+          panelEl?.offsetWidth ??
+          448;
         const mapW = mapDiv.clientWidth ?? 0;
-        if (mapW <= 0 || panelW >= mapW * 0.88) {
+        const dx = computeLocationPanelPanOffsetPx({
+          mapWidthPx: mapW,
+          panelWidthPx: panelW,
+          filterOverlayReserveX: MAP_FILTER_OVERLAY_RESERVE_X,
+        });
+        if (dx === 0) {
           mapPanDxRef.current = 0;
           return;
         }
-        const rightReserve = Math.min(
-          MAP_FILTER_OVERLAY_RESERVE_X,
-          Math.max(0, mapW - panelW - 32)
-        );
-        const visibleW = mapW - panelW - rightReserve;
-        if (visibleW < 48) {
-          mapPanDxRef.current = 0;
-          return;
-        }
-        const dx = Math.round((panelW - rightReserve) / 2);
         m.panBy(dx, 0);
         mapPanDxRef.current = dx;
       };
@@ -663,11 +245,7 @@ export default function MapDashboard() {
           SPOTLIGHT_FOCUS_ZOOM,
           spotlightZoomAnimatingRef,
           () => {
-            clearMapPointsFetchPipeline(
-              abortInFlightMapPointsFetchRef,
-              mapPointsDebounceTimerRef
-            );
-            runMapPointsFetchRef.current?.();
+            flushMapPointsAfterSpotlightZoom();
             requestAnimationFrame(() => {
               requestAnimationFrame(() => {
                 applyPanelAwareCenter();
@@ -710,7 +288,7 @@ export default function MapDashboard() {
         mapPanDxRef.current = 0;
       }
     };
-  }, [map, isLoaded, selected, activeSpotlight]);
+  }, [map, isLoaded, selected, activeSpotlight, flushMapPointsAfterSpotlightZoom]);
 
   useEffect(() => {
     if (!selected) {
@@ -760,16 +338,6 @@ export default function MapDashboard() {
       setMapBootZoom(zoom);
     }
   }, [map]);
-
-  const beginMapPointsRefresh = useCallback((reason: MapPointsRefreshReason) => {
-    void reason;
-    clearMapPointsFetchPipeline(
-      abortInFlightMapPointsFetchRef,
-      mapPointsDebounceTimerRef
-    );
-    setLoadError(null);
-    setPoints(null);
-  }, []);
 
   const handleResetMapView = useCallback(() => {
     if (!map) {
@@ -823,95 +391,16 @@ export default function MapDashboard() {
 
   const markersData = useMemo(() => points ?? [], [points]);
 
-  useEffect(() => {
-    if (
-      !map ||
-      !isLoaded ||
-      !markerLibReady ||
-      scriptError ||
-      typeof google === "undefined"
-    ) {
-      return;
-    }
-
-    clustererRef.current?.clearMarkers();
-    clustererRef.current = null;
-    const markerLookup = markersByKeyRef.current;
-    markerLookup.clear();
-
-    if (markersData.length === 0) {
-      return;
-    }
-
-    const markerLib = google.maps.marker;
-    if (!markerLib?.AdvancedMarkerElement) {
-      return;
-    }
-
-    const markerEntries: Array<{
-      marker: google.maps.marker.AdvancedMarkerElement;
-      onGmpClick: EventListener;
-    }> = [];
-
-    const markers: ClusterMarker[] = markersData.map((p) => {
-      const content = getMarkerContent(p.partner_id, false);
-      const marker = new markerLib.AdvancedMarkerElement({
-        position: { lat: p.latitude, lng: p.longitude },
-        content,
-        title: p.name ?? p.inpost_point_id ?? "Point",
-        gmpClickable: true,
-        collisionBehavior: google.maps.CollisionBehavior.REQUIRED,
-        zIndex: DEFAULT_MARKER_Z_INDEX,
-      });
-      const onGmpClick: EventListener = () => {
-        setActiveSpotlight(null);
-        setSelected(p);
-      };
-      marker.addEventListener("gmp-click", onGmpClick);
-      markerEntries.push({ marker, onGmpClick });
-      markerLookup.set(mapPointKey(p), marker);
-      return marker;
-    });
-
-    clustererRef.current = new MarkerClusterer({
-      markers,
-      map,
-      algorithm: new SuperClusterAlgorithm({
-        radius: 240, maxZoom: 16,
-      }),
-      renderer: inPostClusterRenderer,
-    });
-
-    return () => {
-      clustererRef.current?.clearMarkers();
-      clustererRef.current = null;
-      markerEntries.forEach(({ marker: m, onGmpClick }) => {
-        m.removeEventListener("gmp-click", onGmpClick);
-        MarkerUtils.setMap(m, null);
-      });
-      markerLookup.clear();
-    };
-  }, [map, isLoaded, markerLibReady, scriptError, markersData]);
-
-  useEffect(() => {
-    const lookup = markersByKeyRef.current;
-    const prev = prevSelectedMarkerRef.current;
-    if (prev && (!selected || !isSameMapPoint(prev, selected))) {
-      const marker = lookup.get(mapPointKey(prev));
-      if (marker) {
-        marker.content = getMarkerContent(prev.partner_id, false);
-        marker.zIndex = DEFAULT_MARKER_Z_INDEX;
-      }
-    }
-    if (selected) {
-      const marker = lookup.get(mapPointKey(selected));
-      if (marker) {
-        marker.content = getMarkerContent(selected.partner_id, true);
-        marker.zIndex = SELECTED_MARKER_Z_INDEX;
-      }
-    }
-    prevSelectedMarkerRef.current = selected;
-  }, [markersData, selected]);
+  useMapMarkerCluster({
+    map,
+    isLoaded,
+    markerLibReady,
+    scriptError,
+    markersData,
+    selected,
+    setSelected,
+    setActiveSpotlight,
+  });
 
   if (!apiKey) {
     return (
@@ -1039,12 +528,9 @@ export default function MapDashboard() {
       >
         <MapFiltersPanel
           form={filterForm}
-          onFormChange={(patch) =>
-            setFilterForm((f) => coalesceMapFiltersForm({ ...f, ...patch }))
-          }
+          onFormChange={applyFilterPatch}
           onResetFilters={() => {
-            setFilterForm(emptyMapFiltersForm());
-            setSelectedPartners(new Set());
+            resetFiltersToEmpty();
             beginMapPointsRefresh("reset_filters");
           }}
           partnerOptions={partnerOptions}
