@@ -5,6 +5,7 @@ const FORWARD_QUERY_KEYS = [
   "max_rating",
   "min_review_time",
   "max_review_time",
+  "max_distance_to_google_place_m",
 ] as const;
 
 function truthyNoGooglePlaceOnly(v: string | null): boolean {

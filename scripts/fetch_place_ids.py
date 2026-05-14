@@ -15,7 +15,6 @@ from pymongo import MongoClient
 from constants import (
     DEFAULT_DATABASE_NAME,
     DEFAULT_MONGO_COLLECTION,
-    DEFAULT_NEARBY_KEYWORD,
     DEFAULT_PAGINATION_DELAY,
     DEFAULT_PER_PAGE,
     DEFAULT_RADIUS_METERS,
@@ -60,7 +59,6 @@ def main() -> None:
         logger.error("--sample-size must be >= 1.")
         sys.exit(2)
 
-    kw = (DEFAULT_NEARBY_KEYWORD or "").strip() or None
     effective_per_page = min(DEFAULT_PER_PAGE, args.sample_size)
 
     api_key, mongo_uri = load_settings()
@@ -86,7 +84,6 @@ def main() -> None:
             places_client=places_client,
             repository=repository,
             radius_meters=DEFAULT_RADIUS_METERS,
-            keyword=kw,
         )
         logger.info(
             "Processing up to %s InPost point(s) into '%s.%s'.",

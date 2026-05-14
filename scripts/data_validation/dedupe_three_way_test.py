@@ -107,7 +107,7 @@ def main() -> None:
     w4 = pick_winner_by_precedence(four)
     assert w4["inpost_point_id"] == "PL/op", w4
 
-    print("dedupe_three_way_selfcheck: ok")
+    print("dedupe_three_way_test: ok")
 
 
 def locker_snapshot(doc: dict) -> dict:

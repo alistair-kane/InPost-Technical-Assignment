@@ -19,7 +19,6 @@ sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
 from constants import (
     DEFAULT_DATABASE_NAME,
     DEFAULT_MONGO_COLLECTION,
-    DEFAULT_NEARBY_KEYWORD,
     DEFAULT_PAGINATION_DELAY,
     DEFAULT_PER_PAGE,
     DEFAULT_RADIUS_METERS,
@@ -100,8 +99,6 @@ def main() -> None:
 
     logger.info("Found %s duplicate google_place_id group(s) to process.", len(groups))
 
-    kw = (DEFAULT_NEARBY_KEYWORD or "").strip() or None
-
     with requests.Session() as session:
         session.headers.setdefault("Accept", "application/json")
         inpost_client = InpostClient(session, DEFAULT_START_PAGE, min(DEFAULT_PER_PAGE, 100))
@@ -116,7 +113,6 @@ def main() -> None:
             places_client=places_client,
             repository=repository,
             radius_meters=DEFAULT_RADIUS_METERS,
-            keyword=kw,
         )
 
         for g in groups:

@@ -11,6 +11,14 @@ export const RATING_SLIDER_MIN = 1;
 export const RATING_SLIDER_MAX = 5;
 export const RATING_SLIDER_STEP = 0.5;
 
+/**
+ * Checkbox copy + map cap on `distance_to_google_place_m` (1–50 m).
+ * Omitted from the query only when 'show only no Google place' is enabled
+ * (slider disabled).
+ */
+export const GOOGLE_MAPS_PROXIMITY_RADIUS_M_MIN = 1;
+export const GOOGLE_MAPS_PROXIMITY_RADIUS_M_MAX = 50;
+
 export const DAY_SEC = 86_400;
 /** Mean Gregorian year in seconds (for 12y / 3y / 1y knots). */
 export const YEAR_SEC = 365.25 * DAY_SEC;
@@ -61,7 +69,7 @@ export function partnerLocationTypeFilterLabel(uiPartnerId: number): string {
   if (uiPartnerId === PACZKOPUNKT_UI_PARTNER_ID) {
     return "Paczkopunkt";
   }
-  return `Partner ${uiPartnerId}`;
+  return "Paczkomat";
 }
 
 /**
@@ -170,9 +178,30 @@ export function formatReviewTimeFilterSummary(form: MapFiltersForm): string {
   return `${minLabel} – ${maxLabel}`;
 }
 
+function clampGoogleMapsProximityRadiusM(n: unknown): number {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) {
+    return GOOGLE_MAPS_PROXIMITY_RADIUS_M_MAX;
+  }
+  return Math.max(
+    GOOGLE_MAPS_PROXIMITY_RADIUS_M_MIN,
+    Math.min(GOOGLE_MAPS_PROXIMITY_RADIUS_M_MAX, v)
+  );
+}
+
 export type MapFiltersForm = {
   minRating: number;
   maxRating: number;
+  /**
+   * Sent as `max_distance_to_google_place_m` unless 'show only no Google place'
+   * is checked (slider disabled). Backend includes unresolved Google rows as well
+   * as rows with `distance_to_google_place_m` ≤ this value.
+   */
+  googleMapsProximityRadiusM: number;
+  /**
+   * When true, map shows only points with no resolved Google place (checkbox copy
+   * refers to a 50 m radius; API uses missing `google_place_id`).
+   */
   onlyWithoutGooglePlace: boolean;
   reviewTimeMinIdx: number;
   reviewTimeMaxIdx: number;
@@ -233,6 +262,7 @@ export function patchToggleInpostStatusFilter(
 export const emptyMapFiltersForm = (): MapFiltersForm => ({
   minRating: RATING_SLIDER_MIN,
   maxRating: RATING_SLIDER_MAX,
+  googleMapsProximityRadiusM: GOOGLE_MAPS_PROXIMITY_RADIUS_M_MAX,
   onlyWithoutGooglePlace: false,
   reviewTimeMinIdx: 0,
   reviewTimeMaxIdx: REVIEW_TIME_MAX_KNOT_INDEX,
@@ -249,6 +279,9 @@ export function coalesceMapFiltersForm(
   return {
     minRating: partial.minRating ?? d.minRating,
     maxRating: partial.maxRating ?? d.maxRating,
+    googleMapsProximityRadiusM: clampGoogleMapsProximityRadiusM(
+      partial.googleMapsProximityRadiusM ?? d.googleMapsProximityRadiusM
+    ),
     onlyWithoutGooglePlace:
       partial.onlyWithoutGooglePlace ?? d.onlyWithoutGooglePlace,
     reviewTimeMinIdx: partial.reviewTimeMinIdx ?? d.reviewTimeMinIdx,
@@ -286,6 +319,9 @@ export function areMapFiltersActive(
   if (form.onlyWithoutGooglePlace) {
     return true;
   }
+  if (form.googleMapsProximityRadiusM < GOOGLE_MAPS_PROXIMITY_RADIUS_M_MAX) {
+    return true;
+  }
   if (!isDefaultReviewTimeRange(form.reviewTimeMinIdx, form.reviewTimeMaxIdx)) {
     return true;
   }
@@ -314,6 +350,11 @@ export function buildMapPointsQueryString(
   }
   if (form.onlyWithoutGooglePlace) {
     sp.set("no_google_place_only", "true");
+  } else {
+    sp.set(
+      "max_distance_to_google_place_m",
+      String(form.googleMapsProximityRadiusM)
+    );
   }
 
   const nowSec = Math.floor(Date.now() / 1000);

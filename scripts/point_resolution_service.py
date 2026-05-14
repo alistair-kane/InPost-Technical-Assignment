@@ -31,13 +31,11 @@ class PointResolutionService:
         places_client: GooglePlacesClient,
         repository: PointRepository,
         radius_meters: int,
-        keyword: Optional[str],
     ) -> None:
         self.inpost_client = inpost_client
         self.places_client = places_client
         self.repository = repository
         self.radius_meters = radius_meters
-        self.keyword = keyword
 
     @staticmethod
     def _bad_coordinates(lat: Optional[Any], lng: Optional[Any]) -> bool:
@@ -104,7 +102,6 @@ class PointResolutionService:
             "longitude": lng,
             "places_nearby_status": None,
             "nearby_radius_m": None,
-            "nearby_keyword": None,
             "nearby_results_total": None,
             "google_place_id": None,
             "google_place_name": None,
@@ -130,7 +127,6 @@ class PointResolutionService:
         base, lat, lng = self._common_base(item)
         base["search_strategy"] = "nearby"
         base["nearby_radius_m"] = self.radius_meters
-        base["nearby_keyword"] = self.keyword
         if depth > MAX_RESOLVE_DEPTH:
             base["validation_status"] = "RESOLVE_DEPTH_EXCEEDED"
             base["map_eligible"] = map_eligible_for_document(base)
@@ -147,7 +143,6 @@ class PointResolutionService:
             lat_f,
             lng_f,
             self.radius_meters,
-            self.keyword,
         )
         base["places_nearby_status"] = status
         base["nearby_results_total"] = len(raw_results)

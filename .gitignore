@@ -224,4 +224,6 @@ __marimo__/
 node_modules/
 **/.next/
 
+.DS_Store
+
 backup/

@@ -24,4 +24,18 @@ export type MapPoint = {
   google_user_ratings_total?: number | null;
   google_reviews?: GoogleReviewSnippet[] | null;
   distance_to_google_place_m?: number | null;
+  /** Denormalized from ``google_reviews[*].time_unix`` (ingest / backfill). */
+  google_reviews_time_unix_min?: number | null;
+  google_reviews_time_unix_max?: number | null;
+  /** Max trimmed review body length (matches ``mapSpotlightPresets`` / ``point_utils``). */
+  review_snippet_max_text_len?: number;
+  review_snippet_star_spread?: number | null;
+  review_snippet_star_variance?: number | null;
+  review_snippet_star_count?: number;
 };
+
+/** From ``GET /points/{id}`` only; merged onto list selection for the detail panel. */
+export type MapPointDetailOverlay = Pick<
+  MapPoint,
+  "formatted_address" | "google_maps_uri" | "status" | "validation_status"
+>;

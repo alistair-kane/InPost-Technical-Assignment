@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterator
+from typing import Any
 
 import requests
 
@@ -55,15 +55,3 @@ class InpostClient:
                 break
             page += 1
         return pending[:sample_size]
-
-    def iter_item_batches(self) -> Iterator[list[dict[str, Any]]]:
-        """Yield each page of items from the InPost points API until exhausted."""
-        page = self.start_page
-        while True:
-            batch, total_pages = self._fetch_page(page)
-            if not batch:
-                break
-            yield batch
-            if page >= total_pages:
-                break
-            page += 1

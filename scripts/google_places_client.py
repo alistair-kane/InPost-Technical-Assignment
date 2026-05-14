@@ -70,7 +70,6 @@ class GooglePlacesClient:
         lat: float,
         lng: float,
         radius_m: int,
-        keyword: Optional[str],
     ) -> tuple[str, list[dict[str, Any]]]:
         accumulated: list[dict[str, Any]] = []
         page_token: Optional[str] = None
@@ -83,8 +82,6 @@ class GooglePlacesClient:
                 "key": self.api_key,
                 "language": self.language,
             }
-            if keyword:
-                params["keyword"] = keyword
             if page_token is not None:
                 params["pagetoken"] = page_token
             else:

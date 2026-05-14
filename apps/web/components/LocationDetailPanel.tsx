@@ -85,17 +85,6 @@ export const LocationDetailPanel = forwardRef<
 ) {
   const title = point.name ?? point.inpost_point_id ?? "Location";
   const imageUrl = inpostItem ? str(inpostItem.image_url) : null;
-  const href = inpostItem ? str(inpostItem.href) : null;
-  const apiAddress =
-    inpostItem &&
-    (() => {
-      const addr = inpostItem.address as Record<string, unknown> | undefined;
-      if (!addr || typeof addr !== "object") {
-        return null;
-      }
-      return str(addr.line1) ?? str(addr.line2);
-    })();
-
   const gr = Number(point.google_rating);
   const reviewTotal = point.google_user_ratings_total;
   const reviewCount =

@@ -14,47 +14,33 @@ from app.config import Settings
 
 settings = Settings()
 
-POINT_FIELDS_LIST = {
+# Bbox list: omit long strings and status metadata (client merges ``GET /points/{id}`` for panel).
+POINT_FIELDS_LEAN = {
     "inpost_point_id": 1,
     "partner_id": 1,
     "latitude": 1,
     "longitude": 1,
     "name": 1,
-    "status": 1,
-    "validation_status": 1,
-    "formatted_address": 1,
-    "google_maps_uri": 1,
     "google_rating": 1,
     "google_user_ratings_total": 1,
     "distance_to_google_place_m": 1,
+    "google_reviews_time_unix_min": 1,
+    "google_reviews_time_unix_max": 1,
+    "review_snippet_max_text_len": 1,
+    "review_snippet_star_spread": 1,
+    "review_snippet_star_variance": 1,
+    "review_snippet_star_count": 1,
     "_id": 0,
 }
 
 POINT_FIELDS_DETAIL = {
-    **POINT_FIELDS_LIST,
+    **POINT_FIELDS_LEAN,
+    "status": 1,
+    "validation_status": 1,
+    "formatted_address": 1,
+    "google_maps_uri": 1,
     "google_reviews": 1,
 }
-
-# Per-review fields needed for map spotlights (smaller than full Place Details blobs).
-LIST_REVIEW_SNIPPET_MAP: dict[str, Any] = {
-    "$map": {
-        "input": {"$ifNull": ["$google_reviews", []]},
-        "as": "r",
-        "in": {
-            "rating": "$$r.rating",
-            "time_unix": "$$r.time_unix",
-            "text": "$$r.text",
-            "text_original": "$$r.text_original",
-        },
-    }
-}
-
-
-def _list_points_project_stage(include_review_snippets: bool) -> dict[str, Any]:
-    stage: dict[str, Any] = dict(POINT_FIELDS_LIST)
-    if include_review_snippets:
-        stage["google_reviews"] = LIST_REVIEW_SNIPPET_MAP
-    return stage
 
 
 DEFAULT_MAX_POINTS = 100_000
@@ -189,6 +175,7 @@ def build_points_mongo_filter(
     min_review_time: int | None,
     max_review_time: int | None,
     inpost_status_buckets: list[str] | None,
+    max_distance_to_google_place_m: float | None = None,
 ) -> dict[str, Any]:
     base = point_query_filter()
     rating_bounds = min_rating is not None or max_rating is not None
@@ -197,6 +184,7 @@ def build_points_mongo_filter(
         min_review_time is not None and max_review_time is not None
     )
     inpost_status_filter = bool(inpost_status_buckets)
+    distance_cap = max_distance_to_google_place_m is not None
 
     if (
         not rating_bounds
@@ -204,6 +192,7 @@ def build_points_mongo_filter(
         and not partner_filter
         and not review_time_bounds
         and not inpost_status_filter
+        and not distance_cap
     ):
         return base
 
@@ -236,6 +225,22 @@ def build_points_mongo_filter(
 
     if inpost_status_filter and inpost_status_buckets is not None:
         parts.append(_inpost_status_mongo_filter(inpost_status_buckets))
+
+    if max_distance_to_google_place_m is not None:
+        # Include unresolved Google rows (no place id) alongside in-cap matches so
+        # the default map is not empty of those points when a distance cap applies.
+        parts.append(
+            {
+                "$or": [
+                    _no_google_place_mongo_condition(),
+                    {
+                        "distance_to_google_place_m": {
+                            "$lte": max_distance_to_google_place_m,
+                        }
+                    },
+                ]
+            }
+        )
 
     if len(parts) == 1:
         return parts[0]
@@ -321,7 +326,9 @@ def _normalize_partner_ids_for_meta(raw: list[Any]) -> list[int]:
     return sorted(set(out))
 
 
-class MapPoint(BaseModel):
+class MapPointListItem(BaseModel):
+    """Bbox list row: no ``google_reviews``; no address/URI/status (see ``GET /points/{id}``)."""
+
     model_config = {"extra": "ignore"}
 
     inpost_point_id: str | None = None
@@ -329,20 +336,59 @@ class MapPoint(BaseModel):
     latitude: float
     longitude: float
     name: str | None = None
+    google_rating: float | None = None
+    google_user_ratings_total: int | None = None
+    distance_to_google_place_m: float | None = None
+    google_reviews_time_unix_min: int | None = None
+    google_reviews_time_unix_max: int | None = None
+    review_snippet_max_text_len: int = 0
+    review_snippet_star_spread: float | None = None
+    review_snippet_star_variance: float | None = None
+    review_snippet_star_count: int = 0
+
+
+class MapPoint(MapPointListItem):
     status: str | None = None
     validation_status: str | None = None
     formatted_address: str | None = None
     google_maps_uri: str | None = None
-    google_rating: float | None = None
-    google_user_ratings_total: int | None = None
     google_reviews: list[dict[str, Any]] | None = None
-    distance_to_google_place_m: float | None = None
 
 
 class PointsListResponse(BaseModel):
-    points: list[MapPoint]
+    points: list[MapPointListItem]
     total_matching: int
     in_bbox_matching: int
+
+
+def _coerce_map_point_lean_defaults(doc: dict[str, Any]) -> None:
+    """BSON-safe ints/floats for spotlight summary fields (pre-/post-backfill)."""
+    for k in ("review_snippet_max_text_len", "review_snippet_star_count"):
+        v = doc.get(k)
+        if v is None:
+            doc[k] = 0
+        else:
+            try:
+                doc[k] = int(v)
+            except (TypeError, ValueError):
+                doc[k] = 0
+    for k in ("google_reviews_time_unix_min", "google_reviews_time_unix_max"):
+        v = doc.get(k)
+        if v is None or isinstance(v, bool):
+            doc[k] = None
+        else:
+            try:
+                doc[k] = int(v)
+            except (TypeError, ValueError):
+                doc[k] = None
+    for k in ("review_snippet_star_spread", "review_snippet_star_variance"):
+        v = doc.get(k)
+        if v is None:
+            continue
+        try:
+            doc[k] = float(v)
+        except (TypeError, ValueError):
+            doc[k] = None
 
 
 mongo_client: MongoClient | None = None
@@ -434,6 +480,9 @@ def map_filters_meta(
     _inpost_status: list[str] | None = Query(default=None, alias="inpost_status"),
     min_review_time: int | None = Query(default=None),
     max_review_time: int | None = Query(default=None),
+    max_distance_to_google_place_m: float | None = Query(
+        default=None, ge=1, le=50
+    ),
 ) -> dict[str, Any]:
     _rating_review_partner_validation(min_rating, max_rating, min_review_time, max_review_time)
     # `partner_id` is accepted for proxy symmetry with `/points` but must not affect
@@ -447,6 +496,7 @@ def map_filters_meta(
         min_review_time=min_review_time,
         max_review_time=max_review_time,
         inpost_status_buckets=None,
+        max_distance_to_google_place_m=max_distance_to_google_place_m,
     )
     raw_ids = coll.distinct("partner_id", filter=query_filter)
     return {"partner_ids": _normalize_partner_ids_for_meta(raw_ids)}
@@ -468,7 +518,9 @@ def list_points(
     inpost_status: list[str] | None = Query(default=None),
     min_review_time: int | None = Query(default=None),
     max_review_time: int | None = Query(default=None),
-    include_review_snippets: bool = Query(default=False),
+    max_distance_to_google_place_m: float | None = Query(
+        default=None, ge=1, le=50
+    ),
 ) -> PointsListResponse | JSONResponse:
     _rating_review_partner_validation(min_rating, max_rating, min_review_time, max_review_time)
     a, b, c, d = _validate_bbox(min_lat, max_lat, min_lng, max_lng)
@@ -483,6 +535,7 @@ def list_points(
         min_review_time=min_review_time,
         max_review_time=max_review_time,
         inpost_status_buckets=status_buckets,
+        max_distance_to_google_place_m=max_distance_to_google_place_m,
     )
     combined = _combined_bbox_filter(query_filter, a, b, c, d)
 
@@ -499,19 +552,10 @@ def list_points(
             },
         )
 
-    if include_review_snippets:
-        project = _list_points_project_stage(True)
-        pipeline: list[dict[str, Any]] = [
-            {"$match": combined},
-            {"$sort": {"inpost_point_id": 1}},
-            {"$project": project},
-        ]
-        raw = list(coll.aggregate(pipeline))
-    else:
-        cursor = coll.find(filter=combined, projection=POINT_FIELDS_LIST).sort(
-            "inpost_point_id", 1
-        )
-        raw = list(cursor)
+    cursor = coll.find(filter=combined, projection=POINT_FIELDS_LEAN).sort(
+        "inpost_point_id", 1
+    )
+    raw = list(cursor)
     points: list[MapPoint] = []
     for doc in raw:
         try:
@@ -521,10 +565,10 @@ def list_points(
             continue
         doc["latitude"] = la
         doc["longitude"] = ln
-        if not include_review_snippets:
-            doc["google_reviews"] = None
+        doc.pop("google_reviews", None)
+        _coerce_map_point_lean_defaults(doc)
         try:
-            points.append(MapPoint.model_validate(doc))
+            points.append(MapPointListItem.model_validate(doc))
         except Exception:
             continue
 
@@ -554,6 +598,7 @@ def get_point_by_id(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Point not found") from e
     doc["latitude"] = la
     doc["longitude"] = ln
+    _coerce_map_point_lean_defaults(doc)
     try:
         return MapPoint.model_validate(doc)
     except Exception as e:

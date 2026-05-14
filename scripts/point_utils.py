@@ -86,6 +86,89 @@ def review_time_unix_min_max_from_reviews(
     return min(vals), max(vals)
 
 
+def _review_body_len(review: dict[str, Any]) -> int:
+    """Match ``mapSpotlightPresets.ts`` ``reviewBodyLen``: longer of trimmed originals vs text."""
+    a = str(review.get("text_original") or "").strip()
+    b = str(review.get("text") or "").strip()
+    t = a if len(a) >= len(b) else b
+    return len(t)
+
+
+def _per_review_star_ratings(reviews: list[dict[str, Any]]) -> list[float]:
+    """Finite per-review stars in ``[1, 5]`` — same filter as TS ``perReviewStarRatings``."""
+    out: list[float] = []
+    for r in reviews:
+        if not isinstance(r, dict):
+            continue
+        x = r.get("rating")
+        if isinstance(x, bool):
+            continue
+        if isinstance(x, int):
+            xf = float(x)
+        elif isinstance(x, float) and x == x:
+            xf = float(x)
+        else:
+            continue
+        if 1.0 <= xf <= 5.0:
+            out.append(xf)
+    return out
+
+
+def compute_review_spotlight_summaries(
+    reviews: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """
+    Scalar denormalization for lean map list + spotlights (must match TS spotlight logic).
+
+    Keys: ``review_snippet_max_text_len``, ``review_snippet_star_spread``,
+    ``review_snippet_star_variance``, ``review_snippet_star_count``.
+    When ``star_count < 2``, spread and variance are None (not eligible for controversy).
+    """
+    if not reviews:
+        return {
+            "review_snippet_max_text_len": 0,
+            "review_snippet_star_spread": None,
+            "review_snippet_star_variance": None,
+            "review_snippet_star_count": 0,
+        }
+    max_len = 0
+    for r in reviews:
+        if isinstance(r, dict):
+            max_len = max(max_len, _review_body_len(r))
+    ratings = _per_review_star_ratings([r for r in reviews if isinstance(r, dict)])
+    n = len(ratings)
+    if n < 2:
+        return {
+            "review_snippet_max_text_len": max_len,
+            "review_snippet_star_spread": None,
+            "review_snippet_star_variance": None,
+            "review_snippet_star_count": n,
+        }
+    lo = min(ratings)
+    hi = max(ratings)
+    spread = hi - lo
+    mean = sum(ratings) / n
+    variance = sum((v - mean) * (v - mean) for v in ratings) / n
+    return {
+        "review_snippet_max_text_len": max_len,
+        "review_snippet_star_spread": float(spread),
+        "review_snippet_star_variance": float(variance),
+        "review_snippet_star_count": n,
+    }
+
+
+def apply_review_spotlight_summaries(doc: dict[str, Any]) -> None:
+    """Write ``review_snippet_*`` fields from ``doc[''google_reviews'']`` (mutates doc)."""
+    raw = doc.get("google_reviews")
+    reviews = raw if isinstance(raw, list) else None
+    clean = [r for r in (reviews or []) if isinstance(r, dict)]
+    out = compute_review_spotlight_summaries(clean)
+    doc["review_snippet_max_text_len"] = int(out["review_snippet_max_text_len"])
+    doc["review_snippet_star_spread"] = out["review_snippet_star_spread"]
+    doc["review_snippet_star_variance"] = out["review_snippet_star_variance"]
+    doc["review_snippet_star_count"] = int(out["review_snippet_star_count"])
+
+
 def apply_location_and_review_time_bounds(doc: dict[str, Any]) -> None:
     """Set GeoJSON `location` and denormalized review time bounds for map queries."""
     lat, lng = doc.get("latitude"), doc.get("longitude")
@@ -104,6 +187,7 @@ def apply_location_and_review_time_bounds(doc: dict[str, Any]) -> None:
     tmin, tmax = review_time_unix_min_max_from_reviews(reviews)
     doc["google_reviews_time_unix_min"] = tmin
     doc["google_reviews_time_unix_max"] = tmax
+    apply_review_spotlight_summaries(doc)
 
 
 def map_eligible_for_document(doc: dict[str, Any]) -> bool:

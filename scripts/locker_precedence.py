@@ -134,17 +134,6 @@ def newcomer_beats_all_holders(
     return True
 
 
-def locker_snapshot_from_doc(doc: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "status": doc.get("status"),
-        "distance_to_google_place_m": doc.get("distance_to_google_place_m"),
-        "google_user_ratings_total": doc.get("google_user_ratings_total"),
-        "google_reviews": doc.get("google_reviews"),
-        "_id": doc.get("_id"),
-        "inpost_point_id": doc.get("inpost_point_id"),
-    }
-
-
 def apply_preview_to_locker_fields(
     target: MutableMapping[str, Any],
     preview_result: Mapping[str, Any],

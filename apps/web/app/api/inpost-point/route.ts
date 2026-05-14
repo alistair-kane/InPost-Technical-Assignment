@@ -29,7 +29,7 @@ export async function GET(req: Request) {
   const upstream = new URL(INPOST_POINTS_URL);
   upstream.searchParams.set("name", name);
   upstream.searchParams.set("country", rawCountry);
-  upstream.searchParams.set("per_page", "10");
+  upstream.searchParams.set("per_page", "1");
 
   let res: Response;
   try {
