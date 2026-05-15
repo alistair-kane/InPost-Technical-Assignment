@@ -18,7 +18,7 @@ This combination enables
 
 Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
-**Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `GET /points` (bbox + query filters), `GET /points/{id}` (detail including `google_reviews`), `GET /map-filters-meta`.
+**Architecture:** The **Next.js** app (`apps/web`) renders the Google JavaScript map. **FastAPI** (`apps/api`) serves queries to MongoDB with `GET /points` (bbox + query filters), `GET /points/{id}` (detail including `google_reviews`), `GET /map-filters-meta`.
 
 **Data pipeline:** `scripts/fetch_place_ids.py` walks the **InPost global points API**, skips rows that already have `google_place_id`, queries Places Nearby Search API around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, google_reviews, distance, and validation fields.
 
@@ -61,7 +61,7 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 - **Python 3.12** (recommended; matches CI) with `pip` and `venv`.
 - **Google Cloud**: **Maps JavaScript API** key and a **Map ID** for the map UI. For optional locker→Place ingest, **Places API** (Nearby Search + Place Details).
 
-You need data in MongoDB for the dashboard to show points, populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`.
+You need data in MongoDB for the dashboard to show points—either load your own dump or populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`.
 
 This section focuses on running on a local machine. Hosting on a server behind a reverse proxy is out of scope (the production deploy attaches the **`inpost-web`** container to the host’s Caddy network after `docker compose up`).
 
@@ -151,13 +151,14 @@ MONGO_PUBLISH=27017:27017 \
 ## What I would do with more time
 
 1. **Incremental sync** — Scheduled or queue-driven Place Details refreshes so ratings and review counts track reality without full re-ingestion.
-2. **Alternative Google Review API** — Use of a 3rd party API can have the advantage of access to the full Google review history (Google API provides only the 5 most 'relevant' reviews). Additionally cost/fetch is reduced for scheduled refreshing.
+2. **Alternative Google Review API** — Use of a third-party API can have the advantage of access to the full Google review history (Google API provides only the five most “relevant” reviews). Additionally, cost per fetch is reduced for scheduled refreshing.
 3. **UX** — Shareable URLs encoding filters and viewport, exports (CSV / GeoJSON), and exposing an API of the merged database.
-4. **Larger Geographical Coverage** — Expanding the data to include all countries that InPost is present in. 
+4. **Larger Geographical Coverage** — Expanding the data to include all countries where InPost operates.
+5. **Data Summary** — Summarizing key data aggregations and insights.
 
 ## AI usage
 
-I used Cursor (auto model) extensively in the development of this project. My typical pattern of use was first to stipulate a feature plan and refine it until I was satisfied with the implementation specification. I then check the output, test and refine further if necessary.
+I used Cursor (auto model) extensively in the development of this project. My typical pattern of use was first to stipulate a feature plan and refine it until I was satisfied with the implementation specification. I then checked the output, tested it, and refined further if necessary.
 
 ## Anything else?
 
