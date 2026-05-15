@@ -94,7 +94,7 @@ cd apps/api
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Health check: **http://127.0.0.1:8000/health**
