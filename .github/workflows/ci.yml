@@ -125,7 +125,7 @@ jobs:
             docker compose up -d --build --force-recreate --remove-orphans
 
             web_cid="$(docker compose ps -q inpost-web)"
-            connect_out="$(docker network connect "${CADDY_DOCKER_NETWORK}" "${web_cid}" 2>&1)" || {
+            connect_out="$(docker network connect --alias inpost-web "${CADDY_DOCKER_NETWORK}" "${web_cid}" 2>&1)" || {
               if echo "${connect_out}" | grep -qiE 'already (exists|attached|belongs)' \
                 || echo "${connect_out}" | grep -qi 'is already attached to network'; then
                 :
