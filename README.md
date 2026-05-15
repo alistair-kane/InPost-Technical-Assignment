@@ -35,24 +35,15 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 [![@react-google-maps/api](https://img.shields.io/badge/npm-@react--google--maps%2Fapi-CB3837?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@react-google-maps/api)
 [![markerclusterer](https://img.shields.io/badge/npm-@googlemaps%2Fmarkerclusterer-CB3837?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@googlemaps/markerclusterer)
 
-![Turbopack](https://img.shields.io/badge/next_dev-Turbopack-646CFF?style=flat-square&logo=nextdotjs&logoColor=white)
-![ESLint](https://img.shields.io/badge/ESLint-9-4B32C3?style=flat-square&logo=eslint&logoColor=white)
-![Vitest](https://img.shields.io/badge/Vitest-3-6E9F18?style=flat-square&logo=vitest&logoColor=white)
-
 ### Backend
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-green?style=flat-square)
-![Pydantic](https://img.shields.io/badge/Pydantic_Settings-E92063?style=flat-square&logo=pydantic&logoColor=white)
 ![PyMongo](https://img.shields.io/badge/PyMongo-47A248?style=flat-square&logo=mongodb&logoColor=white)
-![slowapi](https://img.shields.io/badge/slowapi-rate_limiting-555555?style=flat-square)
 
 ### Ingest & data
 
 ![Python ingest](https://img.shields.io/badge/Python-3.12%20(API)%20%7C%203.10%2B%20(scripts)-3776AB?style=flat-square&logo=python&logoColor=white)
-![Requests](https://img.shields.io/badge/requests-http-3776AB?style=flat-square&logo=python&logoColor=white)
-![Haversine](https://img.shields.io/badge/haversine-distance-3776AB?style=flat-square&logo=python&logoColor=white)
-![python-dotenv](https://img.shields.io/badge/python--dotenv-.env-3776AB?style=flat-square&logo=python&logoColor=white)
 
 ![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white)
 
@@ -128,36 +119,16 @@ npm run dev
 
 App: **http://localhost:3000**
 
-### Optional
-
-**API tests** (from repo root; use a separate DB name if you want isolation):
-
-```bash
-pip install -r apps/api/requirements-dev.txt
-PYTHONPATH=apps/api \
-  MONGODB_URI=mongodb://localhost:27017/inpost_assignment_test \
-  MAP_DASHBOARD_API_SECRET=test-secret \
-  pytest apps/api/tests/ -q
-```
-
-**Ingest / refresh Google Place ids** (separate venv at repo root is fine):
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python scripts/fetch_place_ids.py --sample-size 5
-```
-
 ## What I would do with more time
 
 1. **Incremental sync** — Scheduled or queue-driven Place Details refreshes so ratings and review counts track reality without full re-ingestion.
 2. **Alternative Google Review API** — Use of a 3rd party API can have the advantage of access to the full Google review history (Google API provides only the 5 most 'relevant' reviews). Additionally cost/fetch is reduced for scheduled refreshing.
 3. **UX** — Shareable URLs encoding filters and viewport, exports (CSV / GeoJSON), and exposing an API of the merged database.
-4. **Larger Geographical Coverage** — Expanding the data to include all countries that InPost provides locations in. 
+4. **Larger Geographical Coverage** — Expanding the data to include all countries that InPost is present in. 
 
 ## AI usage
 
+I used Cursor extensively in the development of all aspects of this project. My typical pattern of use was first to define a plan and refine it until I was satisfied with the implementation specification. I then check the output, test and refine further if necessary. 
 
 ## Anything else?
 
