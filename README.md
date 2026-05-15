@@ -61,9 +61,9 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 - **Python 3.12** (recommended; matches CI) with `pip` and `venv`.
 - **Google Cloud**: **Maps JavaScript API** key and a **Map ID** for the map UI. For optional locker→Place ingest, **Places API** (Nearby Search + Place Details).
 
-You need data in MongoDB for the dashboard to show points (your own dump, or populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`).
+You need data in MongoDB for the dashboard to show points, populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`.
 
-This section focuses on running on your laptop. Hosting on a server behind a reverse proxy is out of scope (the production deploy attaches the **`inpost-web`** container to the host’s Caddy network after `docker compose up`).
+This section focuses on running on a local machine. Hosting on a server behind a reverse proxy is out of scope (the production deploy attaches the **`inpost-web`** container to the host’s Caddy network after `docker compose up`).
 
 ### Path A — MongoDB in Docker, API and Next.js on your machine (hot reload)
 
