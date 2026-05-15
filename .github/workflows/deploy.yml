@@ -2,115 +2,70 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
 
 concurrency:
-  group: production
-  cancel-in-progress: false
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
+  group: deploy-production
+  cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    environment: production
+
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1635cc01e6b75e988962614a63 # v4.2.2
+        uses: actions/checkout@v4
 
-      - name: Set image names
-        run: |
-          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE_WEB=${{ env.REGISTRY }}/${REPO_LC}/web" >> "$GITHUB_ENV"
-          echo "IMAGE_API=${{ env.REGISTRY }}/${REPO_LC}/api" >> "$GITHUB_ENV"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@978edf1e106d4a32723ce8274c0a4d0be94b62a7 # v3.3.0
+      - name: Upload project to server
+        uses: appleboy/scp-action@v0.1.7
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "."
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
+          overwrite: true
+          rm: false
+          tar_dereference: true
+          exclude: .git,node_modules,**/.next,**/__pycache__,.venv,.venv-test,.cursor
 
-      - name: Build and push web image
-        uses: docker/build-push-action@4719e499c7d35b731e71bcca1e2dbb1971234362 # v6.15.0
-        with:
-          context: ./apps/web
-          push: true
-          tags: |
-            ${{ env.IMAGE_WEB }}:${{ github.sha }}
-            ${{ env.IMAGE_WEB }}:latest
-          build-args: |
-            NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
-            NEXT_PUBLIC_GOOGLE_MAP_ID=${{ secrets.NEXT_PUBLIC_GOOGLE_MAP_ID }}
-
-      - name: Build and push api image
-        uses: docker/build-push-action@4719e499c7d35b731e71bcca1e2dbb1971234362 # v6.15.0
-        with:
-          context: ./apps/api
-          push: true
-          tags: |
-            ${{ env.IMAGE_API }}:${{ github.sha }}
-            ${{ env.IMAGE_API }}:latest
-
-      - name: Configure SSH
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
-
-      - name: Sync files to server
-        run: |
-          DEPLOY_DIR=/opt/inpost-map
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p ${DEPLOY_DIR}/deploy"
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            docker-compose.yml docker-compose.prod.yml \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${DEPLOY_DIR}/"
-          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -r \
-            deploy/caddy deploy/deploy-remote.sh \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${DEPLOY_DIR}/deploy/"
-
-      - name: Deploy on server
+      - name: Restart stack with Docker Compose
+        uses: appleboy/ssh-action@v1.0.3
         env:
-          GHCR_IMAGE_WEB: ${{ env.IMAGE_WEB }}:${{ github.sha }}
-          GHCR_IMAGE_API: ${{ env.IMAGE_API }}:${{ github.sha }}
           MAP_DASHBOARD_API_SECRET: ${{ secrets.MAP_DASHBOARD_API_SECRET }}
           CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "GHCR_IMAGE_WEB='${GHCR_IMAGE_WEB}' GHCR_IMAGE_API='${GHCR_IMAGE_API}' MAP_DASHBOARD_API_SECRET='${MAP_DASHBOARD_API_SECRET}' CORS_ORIGINS='${CORS_ORIGINS}' GHCR_TOKEN='${GHCR_TOKEN}' GHCR_USER='${GHCR_USER}' bash -s" <<'REMOTE'
-          set -euo pipefail
-          DEPLOY_DIR=/opt/inpost-map
-          cd "$DEPLOY_DIR"
-          chmod +x deploy/deploy-remote.sh
+          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ secrets.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
+          NEXT_PUBLIC_GOOGLE_MAP_ID: ${{ secrets.NEXT_PUBLIC_GOOGLE_MAP_ID }}
+          CADDY_DOCKER_NETWORK: ${{ secrets.CADDY_DOCKER_NETWORK }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: MAP_DASHBOARD_API_SECRET,CORS_ORIGINS,NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,NEXT_PUBLIC_GOOGLE_MAP_ID,CADDY_DOCKER_NETWORK
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
 
-          CADDY_NET=""
-          if [[ -f .env ]] && grep -q '^CADDY_DOCKER_NETWORK=' .env; then
-            CADDY_NET=$(grep '^CADDY_DOCKER_NETWORK=' .env | cut -d= -f2-)
-          fi
+            : "${MAP_DASHBOARD_API_SECRET:?MAP_DASHBOARD_API_SECRET is required}"
+            : "${CORS_ORIGINS:?CORS_ORIGINS is required}"
+            : "${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:?NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is required}"
+            : "${NEXT_PUBLIC_GOOGLE_MAP_ID:?NEXT_PUBLIC_GOOGLE_MAP_ID is required}"
+            : "${CADDY_DOCKER_NETWORK:?CADDY_DOCKER_NETWORK is required}"
 
-          umask 077
-          printf '%s\n' \
-            "GHCR_IMAGE_WEB=${GHCR_IMAGE_WEB}" \
-            "GHCR_IMAGE_API=${GHCR_IMAGE_API}" \
-            "MAP_DASHBOARD_API_SECRET=${MAP_DASHBOARD_API_SECRET}" \
-            "CORS_ORIGINS=${CORS_ORIGINS}" \
-            "CADDY_DOCKER_NETWORK=${CADDY_NET}" > .env
+            umask 077
+            printf '%s\n' \
+              "MAP_DASHBOARD_API_SECRET=${MAP_DASHBOARD_API_SECRET}" \
+              "CORS_ORIGINS=${CORS_ORIGINS}" \
+              "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}" \
+              "NEXT_PUBLIC_GOOGLE_MAP_ID=${NEXT_PUBLIC_GOOGLE_MAP_ID}" \
+              "CADDY_DOCKER_NETWORK=${CADDY_DOCKER_NETWORK}" > .env
 
-          if [[ -z "${CADDY_NET}" ]]; then
-            echo "CADDY_DOCKER_NETWORK is not set in ${DEPLOY_DIR}/.env — add it before deploying." >&2
-            exit 1
-          fi
-
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
-          ./deploy/deploy-remote.sh
-          REMOTE
+            docker compose up -d --build --force-recreate --remove-orphans
+            docker compose ps

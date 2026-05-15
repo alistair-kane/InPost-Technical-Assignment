@@ -17,10 +17,10 @@ The **`apps/web`** Next.js app shows locker locations from MongoDB on **Google M
 
 ### Run the full stack locally
 
-From the repo root:
+From the repo root (uses [`docker-compose.dev.yml`](docker-compose.dev.yml) for published ports):
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 Open **`http://localhost:3000`**. The API lives at **`http://localhost:8000`** (for example **`GET /health`** and **`GET /health/ready`**).
@@ -40,65 +40,52 @@ export NEXT_PUBLIC_GOOGLE_MAP_ID=…  # vector map ID from Google Cloud Console
 npm run dev
 ```
 
-### Production-oriented Compose
-
-[**docker-compose.prod.yml**](docker-compose.prod.yml) stops publishing **`mongo` port** `27017` to the host. Use it alongside the base file:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-```
-
-Before production, set **`CORS_ORIGINS`** to your HTTPS Next.js origin(s), terminate TLS at your reverse proxy, and rotate **`MAP_DASHBOARD_API_SECRET`**. Keep MongoDB reachable only inside the Compose network unless you deliberately use Atlas or another hosted database.
+Before production, set **`CORS_ORIGINS`** to your HTTPS Next.js origin(s), terminate TLS at your reverse proxy, and rotate **`MAP_DASHBOARD_API_SECRET`**. The default [`docker-compose.yml`](docker-compose.yml) does not publish MongoDB or API ports to the host.
 
 ---
 
 ## Deployment (GitHub Actions + existing Caddy)
 
-Production deploys on **push to `main`**: CI builds Docker images, pushes to **GHCR**, and SSHs to your VPS. TLS is handled by your **existing Caddy container** (add a site block; do not install a second Caddy).
+On **push to `main`** (or **workflow_dispatch**), Actions uploads the repo to your VPS and runs **`docker compose up -d --build`** there. No container registry. TLS stays with your **existing Caddy container** (add a site block; do not install a second Caddy).
 
 ### Architecture
 
 - **Caddy** (already on the server) terminates HTTPS and `reverse_proxy`s to **`inpost-web:3000`** on a shared Docker network.
-- **`inpost-web`**, **`api`**, and **`mongo`** run via Compose; only `inpost-web` joins the Caddy network. MongoDB and FastAPI have **no host ports**.
-- Secrets stay in **GitHub Actions secrets** and a server-side **`/opt/inpost-map/.env`** (`chmod 600`), never in git.
+- **`inpost-web`**, **`api`**, and **`mongo`** are defined in a single [`docker-compose.yml`](docker-compose.yml). Only `inpost-web` joins the Caddy network. MongoDB and FastAPI have **no host ports**.
+- Secrets are injected from **GitHub Actions** into a server `.env` on each deploy (`chmod 600`), never committed to git.
 
 ### One-time server setup
 
-1. **DNS:** `A` / `AAAA` for `APP_DOMAIN` → your VPS (same IP as your other Caddy app).
-2. **Caddy network:** `docker network ls` and inspect your Caddy container to find the external network name (e.g. `reverse_proxy`).
-3. **Caddy site block:** Merge [`deploy/caddy/inpost-map.caddy`](deploy/caddy/inpost-map.caddy) into your existing Caddyfile (replace hostname with `APP_DOMAIN`), then reload:
+1. **DNS:** `A` / `AAAA` for your public hostname → your VPS.
+2. **Caddy network:** `docker network ls` and inspect your Caddy container (e.g. `reverse_proxy`).
+3. **Caddy site block:** Merge [`deploy/caddy/inpost-map.caddy`](deploy/caddy/inpost-map.caddy) into your existing Caddyfile, then reload:
    ```bash
    docker exec <caddy_container> caddy reload --config /etc/caddy/Caddyfile
    ```
-4. **Deploy directory:** Create `/opt/inpost-map` and a first `.env` that includes at least:
-   ```bash
-   CADDY_DOCKER_NETWORK=your_caddy_network_name
-   ```
-   CI will refresh image tags and app secrets on each deploy but **preserves** `CADDY_DOCKER_NETWORK` from this file.
-5. **GHCR:** After the first workflow run, set each package (`web`, `api`) to **Private** under GitHub Packages (recommended for public repos).
-6. **Google Cloud:** Restrict the Maps API key HTTP referrers to `https://<APP_DOMAIN>/*`.
-7. **Firewall:** Allow 22, 80, 443; do not expose 27017 or 8000 publicly.
+4. **Deploy path:** Create the directory named in the `DEPLOY_PATH` secret (e.g. `/opt/inpost-map`).
+5. **Google Cloud:** Restrict the Maps API key HTTP referrers to `https://<your-domain>/*`.
+6. **Firewall:** Allow 22, 80, 443; do not expose 27017 or 8000 publicly.
 
 ### GitHub Actions secrets
 
 | Secret | Purpose |
 |--------|---------|
+| `DEPLOY_PATH` | Absolute path on the server (e.g. `/opt/inpost-map`) |
 | `SSH_HOST` | VPS hostname or IP |
 | `SSH_USER` | Deploy user (e.g. `deploy`) |
 | `SSH_PRIVATE_KEY` | Ed25519 private key |
-| `APP_DOMAIN` | Public hostname (for docs / Caddy) |
+| `SSH_PORT` | Optional SSH port (default 22) |
+| `CADDY_DOCKER_NETWORK` | External Docker network shared with Caddy |
 | `MAP_DASHBOARD_API_SECRET` | Shared API key for web → api |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Baked into web image at build time |
 | `NEXT_PUBLIC_GOOGLE_MAP_ID` | Baked into web image at build time |
 | `CORS_ORIGINS` | e.g. `https://map.example.com` |
 
-Optional: `GHCR_PULL_TOKEN` (read-only PAT) if `GITHUB_TOKEN` cannot pull from the server.
-
 ### Manual deploy on the server
 
 ```bash
-cd /opt/inpost-map
-./deploy/deploy-remote.sh
+cd /opt/inpost-map   # or your DEPLOY_PATH
+docker compose up -d --build --force-recreate --remove-orphans
 ```
 
 ### Rate limiting (three layers)

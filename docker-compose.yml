@@ -1,8 +1,7 @@
+# Production stack (deployed by GitHub Actions). For local dev, also pass docker-compose.dev.yml.
 services:
   mongo:
     image: mongo:7
-    ports:
-      - "27017:27017"
     volumes:
       - mongo_data:/data/db
     restart: unless-stopped
@@ -10,14 +9,12 @@ services:
   api:
     build:
       context: ./apps/api
-    ports:
-      - "8000:8000"
     environment:
       MONGODB_URI: mongodb://mongo:27017/inpost_assignment
       MONGODB_DB: inpost_assignment
       MONGODB_COLLECTION: inpost_point_google_places
-      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET in .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
     depends_on:
       - mongo
     restart: unless-stopped
@@ -26,17 +23,23 @@ services:
     build:
       context: ./apps/web
       args:
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
-        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID:-}
-    ports:
-      - "3000:3000"
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:?Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID:?Set NEXT_PUBLIC_GOOGLE_MAP_ID}
     environment:
       FASTAPI_URL: http://api:8000
-      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET in .env}
+      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET}
       NODE_ENV: production
     depends_on:
       - api
+    networks:
+      - default
+      - caddy
     restart: unless-stopped
+
+networks:
+  caddy:
+    external: true
+    name: ${CADDY_DOCKER_NETWORK:?Set CADDY_DOCKER_NETWORK}
 
 volumes:
   mongo_data:
