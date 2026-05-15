@@ -93,11 +93,13 @@ Optional: `MONGODB_DB`, `MONGODB_COLLECTION` (defaults are in `apps/api/app/conf
 cd apps/api
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Health check: **http://127.0.0.1:8000/health**
+
+Backend is now running, open a new terminal :)
 
 #### 3. Web (`apps/web`)
 
