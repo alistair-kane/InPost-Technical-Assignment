@@ -27,7 +27,7 @@ describe("tryConsumeClientRateLimit", () => {
 
 describe("rateLimitedFetch", () => {
   it("throws RateLimitError when the bucket is empty", async () => {
-    const config = { maxTokens: 1, windowMs: 60_000 };
+    const config = { maxRequests: 1, windowMs: 60_000 };
     const key = "fetch-test-throw";
     tryConsumeClientRateLimit(key, config);
     await expect(

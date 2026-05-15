@@ -46,7 +46,7 @@ Before production, set **`CORS_ORIGINS`** to your HTTPS Next.js origin(s), termi
 
 ## Deployment (GitHub Actions + existing Caddy)
 
-On **push to `main`** (or **workflow_dispatch**), Actions uploads the repo to your VPS and runs **`docker compose up -d --build`** there. No container registry. TLS stays with your **existing Caddy container** (add a site block; do not install a second Caddy).
+The [**CI**](.github/workflows/ci.yml) workflow runs on **pull requests** and **pushes to `main`**: lint + tests for `apps/web` and `apps/api`. On **push to `main`** (or **workflow_dispatch**), it then uploads the repo to your VPS and runs **`docker compose up -d --build`** (deploy is skipped on PRs). No container registry. TLS stays with your **existing Caddy container** (add a site block; do not install a second Caddy).
 
 ### Architecture
 
