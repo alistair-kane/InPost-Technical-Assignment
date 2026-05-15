@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 import type { InpostPointItem } from "@/components/LocationDetailPanel";
 import { mapInpostPointLookupUrl } from "@/components/mapDashboard/mapApiUrls";
+import { clientRateLimitRule } from "@/lib/rateLimitConfig";
+import { RateLimitError, rateLimitedFetch } from "@/lib/clientRateLimit";
 import { parseInpostNameAndCountry } from "@/lib/inpostPointQuery";
 import type { MapPoint } from "@/types/mapPoint";
 
@@ -40,9 +42,12 @@ export function useInpostPointLookup(selected: MapPoint | null): {
     });
     void (async () => {
       try {
-        const res = await fetch(mapInpostPointLookupUrl(qs), {
-          signal: ac.signal,
-        });
+        const res = await rateLimitedFetch(
+          mapInpostPointLookupUrl(qs),
+          { signal: ac.signal },
+          "inpost-point",
+          clientRateLimitRule("inpost-point")
+        );
         const data = (await res.json().catch(() => ({}))) as {
           item?: InpostPointItem;
           error?: string;
@@ -61,6 +66,11 @@ export function useInpostPointLookup(selected: MapPoint | null): {
         setInpostItem(data.item ?? null);
       } catch (e) {
         if ((e as Error).name === "AbortError") {
+          return;
+        }
+        if (e instanceof RateLimitError) {
+          setInpostError(e.message);
+          setInpostItem(null);
           return;
         }
         setInpostError("InPost lookup failed");

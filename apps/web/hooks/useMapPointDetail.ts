@@ -3,6 +3,8 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 import { mapMapPointDetailUrl } from "@/components/mapDashboard/mapApiUrls";
+import { clientRateLimitRule } from "@/lib/rateLimitConfig";
+import { RateLimitError, rateLimitedFetch } from "@/lib/clientRateLimit";
 import type {
   GoogleReviewSnippet,
   MapPoint,
@@ -41,7 +43,12 @@ export function useMapPointDetail(selected: MapPoint | null): {
     const ac = new AbortController();
     void (async () => {
       try {
-        const res = await fetch(mapMapPointDetailUrl(id), { signal: ac.signal });
+        const res = await rateLimitedFetch(
+          mapMapPointDetailUrl(id),
+          { signal: ac.signal },
+          "map-point",
+          clientRateLimitRule("map-point")
+        );
         const data = (await res.json().catch(() => ({}))) as Record<
           string,
           unknown
@@ -75,10 +82,16 @@ export function useMapPointDetail(selected: MapPoint | null): {
           validation_status: strOrNull(data.validation_status),
         });
       } catch (e) {
-        if ((e as Error).name !== "AbortError" && !ac.signal.aborted) {
+        if ((e as Error).name === "AbortError" || ac.signal.aborted) {
+          return;
+        }
+        if (e instanceof RateLimitError) {
           setDetailReviews([]);
           setDetailOverlay(null);
+          return;
         }
+        setDetailReviews([]);
+        setDetailOverlay(null);
       } finally {
         if (!ac.signal.aborted) {
           setDetailReviewsLoading(false);

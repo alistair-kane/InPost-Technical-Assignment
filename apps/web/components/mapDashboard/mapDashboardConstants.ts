@@ -14,6 +14,12 @@ export const DEFAULT_MARKER_Z_INDEX = 0;
 export const MAP_BBOX_PADDING = 0.14;
 /** After map `idle`, wait before calling `/api/map-points` (reduces spam while panning). */
 export const MAP_POINTS_IDLE_DEBOUNCE_MS = 1000;
+
+/** Client-side rate limits (see `apps/web/lib/rateLimitConfig.ts` for server caps). */
+export {
+  clientRateLimitRule,
+  type RateLimitRouteId,
+} from "@/lib/rateLimitConfig";
 /** Must match server default cap expectation for dashboard loads. */
 export const MAP_MAX_POINTS = 100_000;
 

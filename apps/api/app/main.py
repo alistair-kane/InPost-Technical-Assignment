@@ -9,8 +9,12 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pydantic import BaseModel
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import Settings
+from app.rate_limit import limiter
 
 settings = Settings()
 
@@ -407,6 +411,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="InPost map API", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -470,7 +477,9 @@ def health_ready(coll: Annotated[Any, Depends(get_collection)]) -> dict[str, str
 
 
 @app.get("/map-filters-meta")
+@limiter.limit("20/minute")
 def map_filters_meta(
+    request: Request,
     _: Annotated[None, Depends(verify_api_key)],
     coll: Annotated[Any, Depends(get_collection)],
     min_rating: float | None = Query(default=None),
@@ -503,7 +512,9 @@ def map_filters_meta(
 
 
 @app.get("/points", response_model=None)
+@limiter.limit("30/minute")
 def list_points(
+    request: Request,
     _: Annotated[None, Depends(verify_api_key)],
     coll: Annotated[Any, Depends(get_collection)],
     min_lat: float | None = Query(default=None),
@@ -580,7 +591,9 @@ def list_points(
 
 
 @app.get("/points/{inpost_point_id:path}", response_model=MapPoint)
+@limiter.limit("60/minute")
 def get_point_by_id(
+    request: Request,
     _: Annotated[None, Depends(verify_api_key)],
     coll: Annotated[Any, Depends(get_collection)],
     inpost_point_id: str,

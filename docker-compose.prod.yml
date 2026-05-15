@@ -1,12 +1,27 @@
-# Production-oriented overrides: do not publish MongoDB to the host.
-# Set CORS_ORIGINS to your HTTPS Next.js origin before deploying.
+# Production overrides: no host ports for mongo/api; web only on Caddy Docker network.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
 #
-# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Set GHCR_IMAGE_API, GHCR_IMAGE_WEB (CI writes these), CADDY_DOCKER_NETWORK, CORS_ORIGINS.
 
-# services:
-#   mongo:
-#     ports: []
+services:
+  mongo:
+    ports: []
 
-#   api:
-#     environment:
-#       CORS_ORIGINS: ${CORS_ORIGINS}
+  api:
+    image: ${GHCR_IMAGE_API:?Set GHCR_IMAGE_API}
+    ports: []
+    environment:
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to your HTTPS origin}
+
+  inpost-web:
+    image: ${GHCR_IMAGE_WEB:?Set GHCR_IMAGE_WEB}
+    ports: []
+    networks:
+      - default
+      - caddy
+
+networks:
+  caddy:
+    external: true
+    name: ${CADDY_DOCKER_NETWORK:?Set CADDY_DOCKER_NETWORK to your Caddy stack network}

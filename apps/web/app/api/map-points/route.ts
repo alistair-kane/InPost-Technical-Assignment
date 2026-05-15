@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { proxyMapApiJson } from "@/lib/upstreamMapApi";
+
 const FORWARD_QUERY_KEYS = [
   "min_rating",
   "max_rating",
@@ -23,14 +25,13 @@ function truthyNoGooglePlaceOnly(v: string | null): boolean {
 
 export async function GET(req: Request) {
   const base = process.env.FASTAPI_URL?.replace(/\/$/, "") ?? "";
-  const secret = process.env.MAP_DASHBOARD_API_SECRET;
   if (!base) {
     return NextResponse.json(
       { error: "FASTAPI_URL is not configured" },
       { status: 500 }
     );
   }
-  if (!secret) {
+  if (!process.env.MAP_DASHBOARD_API_SECRET) {
     return NextResponse.json(
       { error: "MAP_DASHBOARD_API_SECRET is not configured" },
       { status: 500 }
@@ -61,23 +62,5 @@ export async function GET(req: Request) {
   const qs = outbound.toString();
   const upstreamUrl = qs ? `${base}/points?${qs}` : `${base}/points`;
 
-  let res: Response;
-  try {
-    res = await fetch(upstreamUrl, {
-      headers: { "X-Api-Key": secret },
-      cache: "no-store",
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Map API unreachable" },
-      { status: 502 }
-    );
-  }
-
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return NextResponse.json(body, { status: res.status });
-  }
-
-  return NextResponse.json(body);
+  return proxyMapApiJson(req, upstreamUrl);
 }

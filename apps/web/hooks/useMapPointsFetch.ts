@@ -18,6 +18,8 @@ import {
   clearMapPointsFetchPipeline,
   type MapPointsRefreshReason,
 } from "@/components/mapDashboard/mapPointsRefresh";
+import { clientRateLimitRule } from "@/lib/rateLimitConfig";
+import { RateLimitError, rateLimitedFetch } from "@/lib/clientRateLimit";
 
 export function useMapPointsFetch(
   map: google.maps.Map | null,
@@ -93,7 +95,12 @@ export function useMapPointsFetch(
 
       void (async () => {
         try {
-          const res = await fetch(path, { signal: ac.signal });
+          const res = await rateLimitedFetch(
+            path,
+            { signal: ac.signal },
+            "map-points",
+            clientRateLimitRule("map-points")
+          );
           const data = await res.json().catch(() => ({}));
           if (ac.signal.aborted || cancelled) {
             return;
@@ -120,6 +127,12 @@ export function useMapPointsFetch(
           }
         } catch (e) {
           if ((e as Error).name === "AbortError") {
+            return;
+          }
+          if (e instanceof RateLimitError) {
+            if (!cancelled) {
+              setLoadError(e.message);
+            }
             return;
           }
           if (!cancelled) {

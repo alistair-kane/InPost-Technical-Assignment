@@ -13,6 +13,8 @@ import {
   type MapFiltersForm,
 } from "@/components/mapFiltersQuery";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { clientRateLimitRule } from "@/lib/rateLimitConfig";
+import { rateLimitedFetch } from "@/lib/clientRateLimit";
 
 const FILTER_DEBOUNCE_MS = 260;
 
@@ -87,7 +89,12 @@ export function useMapFiltersQuery(): {
     void (async () => {
       try {
         const path = mapFiltersMetaUrl(mapPointsQueryString);
-        const res = await fetch(path, { signal: ac.signal });
+        const res = await rateLimitedFetch(
+          path,
+          { signal: ac.signal },
+          "map-filters-meta",
+          clientRateLimitRule("map-filters-meta")
+        );
         const data = await res.json().catch(() => ({}));
         if (!res.ok || cancelled) {
           return;

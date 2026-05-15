@@ -52,6 +52,69 @@ Before production, set **`CORS_ORIGINS`** to your HTTPS Next.js origin(s), termi
 
 ---
 
+## Deployment (GitHub Actions + existing Caddy)
+
+Production deploys on **push to `main`**: CI builds Docker images, pushes to **GHCR**, and SSHs to your VPS. TLS is handled by your **existing Caddy container** (add a site block; do not install a second Caddy).
+
+### Architecture
+
+- **Caddy** (already on the server) terminates HTTPS and `reverse_proxy`s to **`inpost-web:3000`** on a shared Docker network.
+- **`inpost-web`**, **`api`**, and **`mongo`** run via Compose; only `inpost-web` joins the Caddy network. MongoDB and FastAPI have **no host ports**.
+- Secrets stay in **GitHub Actions secrets** and a server-side **`/opt/inpost-map/.env`** (`chmod 600`), never in git.
+
+### One-time server setup
+
+1. **DNS:** `A` / `AAAA` for `APP_DOMAIN` → your VPS (same IP as your other Caddy app).
+2. **Caddy network:** `docker network ls` and inspect your Caddy container to find the external network name (e.g. `reverse_proxy`).
+3. **Caddy site block:** Merge [`deploy/caddy/inpost-map.caddy`](deploy/caddy/inpost-map.caddy) into your existing Caddyfile (replace hostname with `APP_DOMAIN`), then reload:
+   ```bash
+   docker exec <caddy_container> caddy reload --config /etc/caddy/Caddyfile
+   ```
+4. **Deploy directory:** Create `/opt/inpost-map` and a first `.env` that includes at least:
+   ```bash
+   CADDY_DOCKER_NETWORK=your_caddy_network_name
+   ```
+   CI will refresh image tags and app secrets on each deploy but **preserves** `CADDY_DOCKER_NETWORK` from this file.
+5. **GHCR:** After the first workflow run, set each package (`web`, `api`) to **Private** under GitHub Packages (recommended for public repos).
+6. **Google Cloud:** Restrict the Maps API key HTTP referrers to `https://<APP_DOMAIN>/*`.
+7. **Firewall:** Allow 22, 80, 443; do not expose 27017 or 8000 publicly.
+
+### GitHub Actions secrets
+
+| Secret | Purpose |
+|--------|---------|
+| `SSH_HOST` | VPS hostname or IP |
+| `SSH_USER` | Deploy user (e.g. `deploy`) |
+| `SSH_PRIVATE_KEY` | Ed25519 private key |
+| `APP_DOMAIN` | Public hostname (for docs / Caddy) |
+| `MAP_DASHBOARD_API_SECRET` | Shared API key for web → api |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Baked into web image at build time |
+| `NEXT_PUBLIC_GOOGLE_MAP_ID` | Baked into web image at build time |
+| `CORS_ORIGINS` | e.g. `https://map.example.com` |
+
+Optional: `GHCR_PULL_TOKEN` (read-only PAT) if `GITHUB_TOKEN` cannot pull from the server.
+
+### Manual deploy on the server
+
+```bash
+cd /opt/inpost-map
+./deploy/deploy-remote.sh
+```
+
+### Rate limiting (three layers)
+
+| Layer | Where | Purpose |
+|-------|--------|---------|
+| Client | React hooks (`rateLimitedFetch`) | UX; reduces accidental spam |
+| Next.js | `middleware.ts` on `/api/*` | Per-IP caps for public BFF routes (`429` + `Retry-After`) |
+| FastAPI | `slowapi` on `/points`, `/map-filters-meta` | Per-IP caps on internal API; uses `X-Forwarded-For` from Next |
+
+Client limits are **not** a security boundary. Server + FastAPI limits protect MongoDB and the InPost proxy. Optional tuning via `RATE_LIMIT_*` env vars (see [`.env.example`](.env.example)).
+
+**429 handling:** Browser hooks show a short “wait a moment” message; respect `retryAfterSeconds` from JSON when present.
+
+---
+
 ## InPost sample to Google Place ID (MongoDB)
 
 The script walks the [InPost global points API](https://api-global-points.easypack24.net/v1/points) until it collects up to your target count of lockers that **do not yet** have a `google_place_id` stored in MongoDB (already-resolved lockers are skipped so Google APIs are not called again). It writes one upsert per processed locker.
