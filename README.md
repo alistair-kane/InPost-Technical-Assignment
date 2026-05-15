@@ -1,155 +1,164 @@
-# InPost-Technical-Assignment
+## [Inpostologia.pl](https://inpostologia.pl)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Frontend CI](https://img.shields.io/github/actions/workflow/status/alistair-kane/InPost-Technical-Assignment/ci.yml?branch=main&label=frontend&logo=next.js)](https://github.com/alistair-kane/InPost-Technical-Assignment/actions/workflows/ci.yml)
-[![Backend CI](https://img.shields.io/github/actions/workflow/status/alistair-kane/InPost-Technical-Assignment/ci.yml?branch=main&label=backend&logo=fastapi&logoColor=white)](https://github.com/alistair-kane/InPost-Technical-Assignment/actions/workflows/ci.yml)
-[![Scripts](https://img.shields.io/badge/scripts-Python%203.10+-3776AB?logo=python&logoColor=white)](scripts/)
+## Author
 
-Connecting InPost's service point data with Google Places for their locations.
+- **Name:** Alistair Kane
+- **Email:** [alkane@student.42warsaw.pl](mailto:alkane@student.42warsaw.pl)
 
-## Map dashboard (Next.js + FastAPI)
+## Overview
 
-The **`apps/web`** Next.js app shows locker locations from MongoDB on **Google Maps** (centered on Poland) with **`@googlemaps/markerclusterer`**. **`apps/api`** is a FastAPI service that exposes **`GET /points`** secured with **`X-Api-Key`**. The browser never sees that secret: the UI calls **`GET /api/map-points`**, which the Next.js server proxies to FastAPI using **`MAP_DASHBOARD_API_SECRET`**.
+**Inpostologia** joins InPost locker and service-point records with the Google Place that best matches each physical site.
 
-### Dashboard prerequisites
+The combination of this data enables
+- Assessment of the location accuracy of InPost points as represented on Google Maps
+- Analysis of review quality, recency, and frequency at InPost locations in Poland nationwide
+- Discovery of the newest, oldest, and longest reviews for locations in any region or filter slice (+ other spotlights)
 
-- Docker and Docker Compose
-- Variables in `.env` (copy from [.env.example](.env.example)):
-  - **`MAP_DASHBOARD_API_SECRET`** (long random string, shared between `api` and `web`)
-  - **`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`** ([Maps JavaScript API](https://developers.google.com/maps/documentation/javascript/overview) enabled; restrict HTTP referrers to `http://localhost:3000` and your eventual HTTPS origins)
-  - **`NEXT_PUBLIC_GOOGLE_MAP_ID`** (a [vector Map ID](https://developers.google.com/maps/documentation/javascript/advanced-markers/setup) from Cloud Console Map Management — required so the app uses **AdvancedMarkerElement**, not deprecated `google.maps.Marker`)
-  - Optionally reuse **`GOOGLE_MAPS_API_KEY`** from ingest for the same GCP key if referrer rules permit
+## Demo & Description
 
-### Run the full stack locally
+Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
-From the repo root (uses [`docker-compose.dev.yml`](docker-compose.dev.yml) for published ports):
+**Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `**GET /points`** (bbox + query filters), `**GET /points/{id}`** (detail including `**google_reviews`**), `**GET /map-filters-meta`**.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
-```
+**Data pipeline:** `**scripts/fetch_place_ids.py`** walks the **InPost global points API**, skips rows that already have `**google_place_id`**, queries Places Nearby Search (legacy) around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, `**google_reviews`**, distance, and validation fields.
 
-Open **`http://localhost:3000`**. The API lives at **`http://localhost:8000`** (for example **`GET /health`** and **`GET /health/ready`**).
+## Technologies
 
-`GET /points` requires header **`X-Api-Key: <MAP_DASHBOARD_API_SECRET>`** and omits MongoDB rows with **`validation_status: SKIPPED_BAD_COORDINATES`**; coordinates must fall within sane lat/lng ranges.
+### Frontend & map
 
-### Local development without rebuilding `web`
+![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Google Maps](https://img.shields.io/badge/Google%20Maps%20Platform-4285F4?style=flat-square&logo=googlemaps&logoColor=white)
 
-With Mongo + API in Docker (or API run locally with `uvicorn`):
+[![@react-google-maps/api](https://img.shields.io/badge/npm-@react--google--maps%2Fapi-CB3837?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@react-google-maps/api)
+[![markerclusterer](https://img.shields.io/badge/npm-@googlemaps%2Fmarkerclusterer-CB3837?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@googlemaps/markerclusterer)
 
-```bash
-cd apps/web
-export FASTAPI_URL=http://localhost:8000
-export MAP_DASHBOARD_API_SECRET=…   # same value as the API service
-export NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=…
-export NEXT_PUBLIC_GOOGLE_MAP_ID=…  # vector map ID from Google Cloud Console
-npm run dev
-```
+![Turbopack](https://img.shields.io/badge/next_dev-Turbopack-646CFF?style=flat-square&logo=nextdotjs&logoColor=white)
+![ESLint](https://img.shields.io/badge/ESLint-9-4B32C3?style=flat-square&logo=eslint&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-3-6E9F18?style=flat-square&logo=vitest&logoColor=white)
 
-Before production, set **`CORS_ORIGINS`** to your HTTPS Next.js origin(s), terminate TLS at your reverse proxy, and rotate **`MAP_DASHBOARD_API_SECRET`**. The default [`docker-compose.yml`](docker-compose.yml) does not publish MongoDB or API ports to the host.
+### Backend
 
----
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-green?style=flat-square)
+![Pydantic](https://img.shields.io/badge/Pydantic_Settings-E92063?style=flat-square&logo=pydantic&logoColor=white)
+![PyMongo](https://img.shields.io/badge/PyMongo-47A248?style=flat-square&logo=mongodb&logoColor=white)
+![slowapi](https://img.shields.io/badge/slowapi-rate_limiting-555555?style=flat-square)
 
-## Deployment (GitHub Actions + existing Caddy)
+### Ingest & data
 
-The [**CI**](.github/workflows/ci.yml) workflow runs on **pull requests** and **pushes to `main`**: lint + tests for `apps/web` and `apps/api`. On **push to `main`** (or **workflow_dispatch**), it then uploads the repo to your VPS and runs **`docker compose up -d --build`** (deploy is skipped on PRs). No container registry. TLS stays with your **existing Caddy container** (add a site block; do not install a second Caddy).
+![Python ingest](https://img.shields.io/badge/Python-3.12%20(API)%20%7C%203.10%2B%20(scripts)-3776AB?style=flat-square&logo=python&logoColor=white)
+![Requests](https://img.shields.io/badge/requests-http-3776AB?style=flat-square&logo=python&logoColor=white)
+![Haversine](https://img.shields.io/badge/haversine-distance-3776AB?style=flat-square&logo=python&logoColor=white)
+![python-dotenv](https://img.shields.io/badge/python--dotenv-.env-3776AB?style=flat-square&logo=python&logoColor=white)
 
-### Architecture
+![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white)
 
-- **Caddy** (already on the server) terminates HTTPS and `reverse_proxy`s to **`inpost-web:3000`** on a shared Docker network.
-- **`inpost-web`**, **`api`**, and **`mongo`** are defined in a single [`docker-compose.yml`](docker-compose.yml). Only `inpost-web` joins the Caddy network. MongoDB and FastAPI have **no host ports**.
-- Secrets are injected from **GitHub Actions** into a server `.env` on each deploy (`chmod 600`), never committed to git.
+### Ops
 
-### One-time server setup
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI%2F_CD-2088FF?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/alistair-kane/InPost-Technical-Assignment/actions/workflows/ci.yml)
 
-1. **DNS:** `A` / `AAAA` for your public hostname → your VPS.
-2. **Caddy network:** `docker network ls` and inspect your Caddy container (e.g. `reverse_proxy`).
-3. **Caddy site block:** Merge [`deploy/caddy/inpost-map.caddy`](deploy/caddy/inpost-map.caddy) into your existing Caddyfile, then reload:
-   ```bash
-   docker exec <caddy_container> caddy reload --config /etc/caddy/Caddyfile
-   ```
-4. **Deploy path:** Create the directory named in the `DEPLOY_PATH` secret (e.g. `/opt/inpost-map`).
-5. **Google Cloud:** Restrict the Maps API key HTTP referrers to `https://<your-domain>/*`.
-6. **Firewall:** Allow 22, 80, 443; do not expose 27017 or 8000 publicly.
 
-### GitHub Actions secrets
+## How to run (locally)
 
-| Secret | Purpose |
-|--------|---------|
-| `DEPLOY_PATH` | Absolute path on the server (e.g. `/opt/inpost-map`) |
-| `SSH_HOST` | VPS hostname or IP |
-| `SSH_USER` | Deploy user (e.g. `deploy`) |
-| `SSH_PRIVATE_KEY` | Ed25519 private key |
-| `SSH_PORT` | Optional SSH port (default 22) |
-| `CADDY_DOCKER_NETWORK` | External Docker network shared with Caddy |
-| `MAP_DASHBOARD_API_SECRET` | Shared API key for web → api |
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Baked into web image at build time |
-| `NEXT_PUBLIC_GOOGLE_MAP_ID` | Baked into web image at build time |
-| `CORS_ORIGINS` | e.g. `https://map.example.com` |
-
-### Manual deploy on the server
-
-```bash
-cd /opt/inpost-map   # or your DEPLOY_PATH
-docker compose up -d --build --force-recreate --remove-orphans
-```
-
-### Rate limiting (three layers)
-
-| Layer | Where | Purpose |
-|-------|--------|---------|
-| Client | React hooks (`rateLimitedFetch`) | UX; reduces accidental spam |
-| Next.js | `middleware.ts` on `/api/*` | Per-IP caps for public BFF routes (`429` + `Retry-After`) |
-| FastAPI | `slowapi` on `/points`, `/map-filters-meta` | Per-IP caps on internal API; uses `X-Forwarded-For` from Next |
-
-Client limits are **not** a security boundary. Server + FastAPI limits protect MongoDB and the InPost proxy. Optional tuning via `RATE_LIMIT_*` env vars (see [`.env.example`](.env.example)).
-
-**429 handling:** Browser hooks show a short “wait a moment” message; respect `retryAfterSeconds` from JSON when present.
-
----
-
-## InPost sample to Google Place ID (MongoDB)
-
-The script walks the [InPost global points API](https://api-global-points.easypack24.net/v1/points) until it collects up to your target count of lockers that **do not yet** have a `google_place_id` stored in MongoDB (already-resolved lockers are skipped so Google APIs are not called again). It writes one upsert per processed locker.
-
-It uses **Places Nearby Search (legacy)** centred on each InPost coordinate (see `scripts/constants.py` for radius, delays, and pagination). It gathers all pages of nearby results, keeps places whose **name** contains `inpost` (case-insensitive), and selects the **closest** match by haversine distance. It then calls **Place Details** (twice for default + original-language reviews).
-
-Other behaviour (Mongo collection name, delays, radius, pagination delay) is controlled by **`DEFAULT_*`** constants in `scripts/constants.py` (used from `scripts/fetch_place_ids.py`).
+MongoDB in Docker, **FastAPI** and **Next.js** on your machine (hot reload). Note this section does not cover the production Compose stack (Caddy, built images, or server deploy).
 
 ### Prerequisites
 
-- Docker (for MongoDB locally)
-- Python 3.10+
-- A Google Maps Platform API key with **Places API** enabled (**Nearby Search** and **Place Details**).
+- **Docker** and **Docker Compose** (for MongoDB).
+- **Node.js 20** and **npm**.
+- **Python 3.12** (recommended; matches CI) with `pip` and `venv`.
+- **Google Cloud**: **Maps JavaScript API** key and a **Map ID** for the map UI. For optional locker→Place ingest, **Places API** (Nearby Search + Place Details).
 
-### 1. Start MongoDB
+You need data in MongoDB for the dashboard to show points (your own dump, or populate via **`scripts/fetch_place_ids.py`** using a repo-root **`.env`** with `GOOGLE_MAPS_API_KEY`)
 
-From the repo root:
+### 1. Clone and start MongoDB
 
 ```bash
-docker compose up -d
+git clone <your-repo-url>
+cd InPost-Technical-Assignment
+
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mongo
 ```
 
-Default URI: `mongodb://localhost:27017/inpost_assignment`.
+Use **`mongodb://localhost:27017/inpost_assignment`** as `MONGODB_URI` unless you changed credentials or the compose file.
 
-### 2. Configure secrets
+### 2. API (`apps/api`)
 
-Copy `.env.example` to `.env` and set `GOOGLE_MAPS_API_KEY`. Adjust `MONGODB_URI` if you use authentication or another host.
+Create **`apps/api/.env`** (Pydantic loads it when Uvicorn’s working directory is `apps/api`):
 
-### 3. Install Python dependencies
+```env
+MONGODB_URI=mongodb://localhost:27017/inpost_assignment
+MAP_DASHBOARD_API_SECRET=choose-a-long-random-string
+```
+
+Optional: `MONGODB_DB`, `MONGODB_COLLECTION` (defaults are in `apps/api/app/config.py`).
+
+```bash
+cd apps/api
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Health check: **http://127.0.0.1:8000/health**
+
+### 3. Web (`apps/web`)
+
+Create **`apps/web/.env.local`**:
+
+```env
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<your-maps-js-api-key>
+NEXT_PUBLIC_GOOGLE_MAP_ID=<your-map-id>
+FASTAPI_URL=http://127.0.0.1:8000
+MAP_DASHBOARD_API_SECRET=<same value as apps/api/.env>
+```
+
+`MAP_DASHBOARD_API_SECRET` must match the API. Next.js server routes call FastAPI; the browser only talks to Next.
+
+```bash
+cd apps/web
+npm ci
+npm run dev
+```
+
+App: **http://localhost:3000**
+
+### Optional
+
+**API tests** (from repo root; use a separate DB name if you want isolation):
+
+```bash
+pip install -r apps/api/requirements-dev.txt
+PYTHONPATH=apps/api \
+  MONGODB_URI=mongodb://localhost:27017/inpost_assignment_test \
+  MAP_DASHBOARD_API_SECRET=test-secret \
+  pytest apps/api/tests/ -q
+```
+
+**Ingest / refresh Google Place ids** (separate venv at repo root is fine):
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 4. Run the ingest script
-
-Command-line options are only **`--sample-size`**, **`--start-page`**, and **`--per-page`**. Everything else uses defaults from constants in `scripts/fetch_place_ids.py`.
-
-```bash
-source .venv/bin/activate
 python scripts/fetch_place_ids.py --sample-size 5
 ```
 
-Documents are upserted into the collection named by **`DEFAULT_MONGO_COLLECTION`** (`google_place_id` is only set when validation status is `OK`). When Place Details succeeds, the document includes **`google_reviews`**: a list of normalized review objects from the [`reviews` field](https://developers.google.com/maps/documentation/places/web-service/details) (Atmosphere SKU billing). Each entry has **`text`** (response default, possibly translated for your language settings) and **`text_original`** from a second request with **`reviews_no_translations=true`**, merged by reviewer `time` and `author_url`. Other stored fields include `search_strategy`, `distance_to_google_place_m`, and status fields.
+## What I would do with more time
+
+1. **Incremental sync** — Scheduled or queue-driven Place Details refreshes so ratings and review counts track reality without full re-ingestion.
+2. **Alternative Google Review API** — Use of a 3rd party API can have the advantage of access to the full Google review history (Google API provides only the 5 most 'relevant' reviews). Additionally cost/fetch is reduced for scheduled refreshing.
+3. **UX** — Shareable URLs encoding filters and viewport, exports (CSV / GeoJSON), and exposing an API of the merged database.
+4. **Larger Geographical Coverage** — Expanding the data to include all countries that InPost provides locations in. 
+
+## AI usage
+
+
+## Anything else?
+
+My hope is that this is a useful tool for InPost employees, especially those involved with customer relations, point servicing and business development.
