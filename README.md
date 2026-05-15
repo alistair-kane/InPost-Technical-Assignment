@@ -9,7 +9,7 @@
 
 **Inpostologia** joins InPost locker and service-point records with the Google Place that best matches each physical site.
 
-The combination of this data enables
+This combination enables
 - Assessment of the location accuracy of InPost points as represented on Google Maps
 - Analysis of review quality, recency, and frequency at InPost locations in Poland nationwide
 - Discovery of the newest, oldest, and longest reviews for locations in any region or filter slice (+ other spotlights)
@@ -20,7 +20,7 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
 **Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `GET /points` (bbox + query filters), `GET /points/{id}` (detail including `google_reviews`), `GET /map-filters-meta`.
 
-**Data pipeline:** `scripts/fetch_place_ids.py` walks the **InPost global points API**, skips rows that already have `google_place_id`, queries Places Nearby Search (legacy) around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, google_reviews, distance, and validation fields.
+**Data pipeline:** `scripts/fetch_place_ids.py` walks the **InPost global points API**, skips rows that already have `google_place_id`, queries Places Nearby Search API around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, google_reviews, distance, and validation fields.
 
 ## Technologies
 
@@ -43,7 +43,7 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
 ### Ingest & data
 
-![Python ingest](https://img.shields.io/badge/Python-3.12%20(API)%20%7C%203.10%2B%20(scripts)-3776AB?style=flat-square&logo=python&logoColor=white)
+![Python ingest](https://img.shields.io/badge/Python-3.10%2B%20(API/scripts)-3776AB?style=flat-square&logo=python&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white)
 
 ### Ops
@@ -70,7 +70,7 @@ This section focuses on running on a local machine. Hosting on a server behind a
 #### 1. Clone and start MongoDB
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/alistair-kane/InPost-Technical-Assignment.git
 cd InPost-Technical-Assignment
 
 MONGO_PUBLISH=27017:27017 docker compose up -d mongo
