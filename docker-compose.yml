@@ -1,10 +1,25 @@
-# Production stack (deployed by GitHub Actions). For local dev, also pass docker-compose.dev.yml.
+# Stack: MongoDB, FastAPI, Next.js (`inpost-web`).
+#
+# Host port publishing uses optional Compose variables — leave them unset on the server so
+# only the internal compose network exposes these services (recommended for production).
+#
+# Local examples:
+#   MONGO_PUBLISH=27017:27017 docker compose up -d mongo
+#   MONGO_PUBLISH=27017:27017 API_PUBLISH=8000:8000 WEB_PUBLISH=3000:3000 docker compose up -d --build
+#
+# Production: keep host ports unset; put a reverse proxy (for example Caddy) on another Docker network
+# and attach this stack’s web container after `docker compose up`, e.g.:
+#   docker network connect <caddy_bridge> "$(docker compose ps -q inpost-web)"
+
 services:
   mongo:
     image: mongo:7
     volumes:
       - mongo_data:/data/db
     restart: unless-stopped
+    ports:
+      # Unset → no host port (internal only). Example host bind: `MONGO_PUBLISH=127.0.0.1:27017:27017`
+      - "${MONGO_PUBLISH:-:27017}"
 
   api:
     build:
@@ -13,33 +28,29 @@ services:
       MONGODB_URI: mongodb://mongo:27017/inpost_assignment
       MONGODB_DB: inpost_assignment
       MONGODB_COLLECTION: inpost_point_google_places
-      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET}
-      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
+      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:-local-dev-change-me-map-secret}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     depends_on:
       - mongo
     restart: unless-stopped
+    ports:
+      - "${API_PUBLISH:-:8000}"
 
   inpost-web:
     build:
       context: ./apps/web
       args:
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:?Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
-        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID:?Set NEXT_PUBLIC_GOOGLE_MAP_ID}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_GOOGLE_MAP_ID: ${NEXT_PUBLIC_GOOGLE_MAP_ID:-}
     environment:
       FASTAPI_URL: http://api:8000
-      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:?Set MAP_DASHBOARD_API_SECRET}
+      MAP_DASHBOARD_API_SECRET: ${MAP_DASHBOARD_API_SECRET:-local-dev-change-me-map-secret}
       NODE_ENV: production
     depends_on:
       - api
-    networks:
-      - default
-      - caddy
     restart: unless-stopped
-
-networks:
-  caddy:
-    external: true
-    name: ${CADDY_DOCKER_NETWORK:?Set CADDY_DOCKER_NETWORK}
+    ports:
+      - "${WEB_PUBLISH:-:3000}"
 
 volumes:
   mongo_data:

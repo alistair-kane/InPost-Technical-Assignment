@@ -120,8 +120,19 @@ jobs:
               "MAP_DASHBOARD_API_SECRET=${MAP_DASHBOARD_API_SECRET}" \
               "CORS_ORIGINS=${CORS_ORIGINS}" \
               "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}" \
-              "NEXT_PUBLIC_GOOGLE_MAP_ID=${NEXT_PUBLIC_GOOGLE_MAP_ID}" \
-              "CADDY_DOCKER_NETWORK=${CADDY_DOCKER_NETWORK}" > .env
+              "NEXT_PUBLIC_GOOGLE_MAP_ID=${NEXT_PUBLIC_GOOGLE_MAP_ID}" > .env
 
             docker compose up -d --build --force-recreate --remove-orphans
+
+            web_cid="$(docker compose ps -q inpost-web)"
+            connect_out="$(docker network connect "${CADDY_DOCKER_NETWORK}" "${web_cid}" 2>&1)" || {
+              if echo "${connect_out}" | grep -qiE 'already (exists|attached|belongs)' \
+                || echo "${connect_out}" | grep -qi 'is already attached to network'; then
+                :
+              else
+                printf '%s\n' "${connect_out}" >&2
+                exit 1
+              fi
+            }
+
             docker compose ps

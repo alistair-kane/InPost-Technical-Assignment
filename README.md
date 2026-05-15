@@ -54,29 +54,31 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
 ## How to run (locally)
 
-MongoDB in Docker, **FastAPI** and **Next.js** on your machine (hot reload). Note this section does not cover the production Compose stack (Caddy, built images, or server deploy).
-
 ### Prerequisites
 
-- **Docker** and **Docker Compose** (for MongoDB).
+- **Docker** and **Docker Compose**.
 - **Node.js 20** and **npm**.
 - **Python 3.12** (recommended; matches CI) with `pip` and `venv`.
 - **Google Cloud**: **Maps JavaScript API** key and a **Map ID** for the map UI. For optional locker→Place ingest, **Places API** (Nearby Search + Place Details).
 
-You need data in MongoDB for the dashboard to show points (your own dump, or populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`)
+You need data in MongoDB for the dashboard to show points (your own dump, or populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`).
 
-### 1. Clone and start MongoDB
+This section focuses on running on your laptop. Hosting on a server behind a reverse proxy is out of scope (the production deploy attaches the **`inpost-web`** container to the host’s Caddy network after `docker compose up`).
+
+### Path A — MongoDB in Docker, API and Next.js on your machine (hot reload)
+
+#### 1. Clone and start MongoDB
 
 ```bash
 git clone <your-repo-url>
 cd InPost-Technical-Assignment
 
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mongo
+MONGO_PUBLISH=27017:27017 docker compose up -d mongo
 ```
 
 Use `mongodb://localhost:27017/inpost_assignment` as `MONGODB_URI` unless you changed credentials or the compose file.
 
-### 2. API (`apps/api`)
+#### 2. API (`apps/api`)
 
 Create `apps/api/.env` (Pydantic loads it when Uvicorn’s working directory is `apps/api`):
 
@@ -97,7 +99,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 Health check: **http://127.0.0.1:8000/health**
 
-### 3. Web (`apps/web`)
+#### 3. Web (`apps/web`)
 
 Create `apps/web/.env.local`:
 
@@ -117,6 +119,34 @@ npm run dev
 ```
 
 App: **http://localhost:3000**
+
+### Path B — MongoDB, FastAPI, and Next.js all in Docker (no reverse proxy)
+
+You do **not** need an external Docker network such as **Caddy** for local use. Compose only wires the stack’s internal network; expose ports on localhost when you want the browser to reach Next.js.
+
+Put API keys so Compose can interpolate them (Compose reads **`docker-compose.yml` from the repo root** and merges a `.env` in the same folder when present):
+
+```env
+MAP_DASHBOARD_API_SECRET=<same-strong-secret-used-below-if-you-set-env-by-hand>
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<your-maps-js-key>
+NEXT_PUBLIC_GOOGLE_MAP_ID=<your-map-id>
+CORS_ORIGINS=http://localhost:3000
+```
+
+Then bring everything up:
+
+```bash
+cd InPost-Technical-Assignment
+
+MONGO_PUBLISH=27017:27017 \
+  API_PUBLISH=8000:8000 \
+  WEB_PUBLISH=3000:3000 \
+  docker compose up -d --build
+```
+
+- App: **http://localhost:3000**
+- API (optional checks): **http://127.0.0.1:8000/health**
+- Omit **`MONGO_PUBLISH`** when you access Mongo only from other containers (`api` connects as `mongodb://mongo:27017/...`).
 
 ## What I would do with more time
 
