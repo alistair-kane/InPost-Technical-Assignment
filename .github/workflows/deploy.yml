@@ -99,13 +99,12 @@ jobs:
           fi
 
           umask 077
-          cat > .env <<EOF
-GHCR_IMAGE_WEB=${GHCR_IMAGE_WEB}
-GHCR_IMAGE_API=${GHCR_IMAGE_API}
-MAP_DASHBOARD_API_SECRET=${MAP_DASHBOARD_API_SECRET}
-CORS_ORIGINS=${CORS_ORIGINS}
-CADDY_DOCKER_NETWORK=${CADDY_NET}
-EOF
+          printf '%s\n' \
+            "GHCR_IMAGE_WEB=${GHCR_IMAGE_WEB}" \
+            "GHCR_IMAGE_API=${GHCR_IMAGE_API}" \
+            "MAP_DASHBOARD_API_SECRET=${MAP_DASHBOARD_API_SECRET}" \
+            "CORS_ORIGINS=${CORS_ORIGINS}" \
+            "CADDY_DOCKER_NETWORK=${CADDY_NET}" > .env
 
           if [[ -z "${CADDY_NET}" ]]; then
             echo "CADDY_DOCKER_NETWORK is not set in ${DEPLOY_DIR}/.env — add it before deploying." >&2
