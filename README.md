@@ -18,9 +18,9 @@ The combination of this data enables
 
 Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
-**Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `GET /points`** (bbox + query filters), `GET /points/{id}` (detail including `google_reviews`), `GET /map-filters-meta`.
+**Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `GET /points` (bbox + query filters), `GET /points/{id}` (detail including `google_reviews`), `GET /map-filters-meta`.
 
-**Data pipeline:** `scripts/fetch_place_ids.py` walks the **InPost global points API**, skips rows that already have `google_place_id`, queries Places Nearby Search (legacy) around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, `**google_reviews`, distance, and validation fields.
+**Data pipeline:** `scripts/fetch_place_ids.py` walks the **InPost global points API**, skips rows that already have `google_place_id`, queries Places Nearby Search (legacy) around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, google_reviews, distance, and validation fields.
 
 ## Technologies
 
@@ -63,7 +63,7 @@ MongoDB in Docker, **FastAPI** and **Next.js** on your machine (hot reload). Not
 - **Python 3.12** (recommended; matches CI) with `pip` and `venv`.
 - **Google Cloud**: **Maps JavaScript API** key and a **Map ID** for the map UI. For optional locker→Place ingest, **Places API** (Nearby Search + Place Details).
 
-You need data in MongoDB for the dashboard to show points (your own dump, or populate via **`scripts/fetch_place_ids.py`** using a repo-root **`.env`** with `GOOGLE_MAPS_API_KEY`)
+You need data in MongoDB for the dashboard to show points (your own dump, or populate via `scripts/fetch_place_ids.py` using a repo-root `.env` with `GOOGLE_MAPS_API_KEY`)
 
 ### 1. Clone and start MongoDB
 
@@ -74,11 +74,11 @@ cd InPost-Technical-Assignment
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mongo
 ```
 
-Use **`mongodb://localhost:27017/inpost_assignment`** as `MONGODB_URI` unless you changed credentials or the compose file.
+Use `mongodb://localhost:27017/inpost_assignment` as `MONGODB_URI` unless you changed credentials or the compose file.
 
 ### 2. API (`apps/api`)
 
-Create **`apps/api/.env`** (Pydantic loads it when Uvicorn’s working directory is `apps/api`):
+Create `apps/api/.env` (Pydantic loads it when Uvicorn’s working directory is `apps/api`):
 
 ```env
 MONGODB_URI=mongodb://localhost:27017/inpost_assignment
@@ -99,7 +99,7 @@ Health check: **http://127.0.0.1:8000/health**
 
 ### 3. Web (`apps/web`)
 
-Create **`apps/web/.env.local`**:
+Create `apps/web/.env.local`:
 
 ```env
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<your-maps-js-api-key>
