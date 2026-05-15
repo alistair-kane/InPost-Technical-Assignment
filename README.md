@@ -99,7 +99,7 @@ python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 Health check: **http://127.0.0.1:8000/health**
 
-Backend is now running, open a new terminal :)
+Backend is now running, open a new terminal for the frontend
 
 #### 3. Web (`apps/web`)
 
@@ -158,3 +158,4 @@ I used Cursor (auto model) extensively in the development of this project. My ty
 ## Anything else?
 
 My hope is that this is a useful tool for InPost employees, especially those involved with customer relations, point servicing and business development.
+Thanks for taking the time check out my project :)
