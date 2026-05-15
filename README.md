@@ -1,5 +1,10 @@
 # InPost-Technical-Assignment
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Frontend CI](https://img.shields.io/github/actions/workflow/status/alistair-kane/InPost-Technical-Assignment/ci.yml?branch=main&label=frontend&logo=next.js)](https://github.com/alistair-kane/InPost-Technical-Assignment/actions/workflows/ci.yml)
+[![Backend CI](https://img.shields.io/github/actions/workflow/status/alistair-kane/InPost-Technical-Assignment/ci.yml?branch=main&label=backend&logo=fastapi&logoColor=white)](https://github.com/alistair-kane/InPost-Technical-Assignment/actions/workflows/ci.yml)
+[![Scripts](https://img.shields.io/badge/scripts-Python%203.10+-3776AB?logo=python&logoColor=white)](scripts/)
+
 Connecting InPost's service point data with Google Places for their locations.
 
 ## Map dashboard (Next.js + FastAPI)
