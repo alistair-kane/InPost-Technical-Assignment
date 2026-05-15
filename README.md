@@ -122,33 +122,26 @@ npm run dev
 
 App: **http://localhost:3000**
 
-### Path B — MongoDB, FastAPI, and Next.js all in Docker (no reverse proxy)
+#### 4. Populate MongoDB with the ingest script (optional)
 
-You do **not** need an external Docker network such as **Caddy** for local use. Compose only wires the stack’s internal network; expose ports on localhost when you want the browser to reach Next.js.
+Requires **Places API** (Nearby Search + Place Details) on the **same Google key** (`GOOGLE_MAPS_API_KEY`).
 
-Put API keys so Compose can interpolate them (Compose reads **`docker-compose.yml` from the repo root** and merges a `.env` in the same folder when present):
+1. Keep **MongoDB** running (step 1) so `MONGODB_URI` resolves (Docker example: `mongodb://localhost:27017/inpost_assignment`).
+2. Create a repo-root `.env` next to `docker-compose.yml`:
+   ```env
+   GOOGLE_MAPS_API_KEY=<your Places-enabled key>
+   MONGODB_URI=mongodb://localhost:27017/inpost_assignment
+   ```
+3. Install script dependencies and run from the repo root (Python adds `scripts/` to the module path automatically):
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate   # Windows: .venv\Scripts\activate
+   python3 -m pip install -r requirements.txt
+   python3 scripts/fetch_place_ids.py --sample-size 25
+   ```
+4. Tune `--sample-size` upward for larger runs. The script skips lockers that already have `google_place_id`, so re-runs are safe. Rate limiting and tuning knobs live in `scripts/constants.py`.
 
-```env
-MAP_DASHBOARD_API_SECRET=<same-strong-secret-used-below-if-you-set-env-by-hand>
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<your-maps-js-key>
-NEXT_PUBLIC_GOOGLE_MAP_ID=<your-map-id>
-CORS_ORIGINS=http://localhost:3000
-```
-
-Then bring everything up:
-
-```bash
-cd InPost-Technical-Assignment
-
-MONGO_PUBLISH=27017:27017 \
-  API_PUBLISH=8000:8000 \
-  WEB_PUBLISH=3000:3000 \
-  docker compose up -d --build
-```
-
-- App: **http://localhost:3000**
-- API (optional checks): **http://127.0.0.1:8000/health**
-- Omit **`MONGO_PUBLISH`** when you access Mongo only from other containers (`api` connects as `mongodb://mongo:27017/...`).
+Restart or refresh the app if it was already open; tiles load from `GET /points` against the same DB and collection the API uses by default (`apps/api/app/config.py`).
 
 ## What I would do with more time
 
