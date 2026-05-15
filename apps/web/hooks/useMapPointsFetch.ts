@@ -161,7 +161,7 @@ export function useMapPointsFetch(
       google.maps.event.removeListener(idleListener);
       runMapPointsFetchRef.current = null;
     };
-  }, [map, mapPointsQueryString]);
+  }, [map, mapPointsQueryString, spotlightZoomAnimatingRef]);
 
   return {
     points,

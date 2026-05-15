@@ -5,7 +5,6 @@ import { GoogleMap, useJsApiLoader } from "@react-google-maps/api";
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -15,33 +14,23 @@ import { LocationDetailPanel } from "./LocationDetailPanel";
 import { MasMascot } from "./MasMascot";
 import { MapFiltersPanel } from "./MapFiltersPanel";
 import { MapSpotlightBar } from "./MapSpotlightBar";
-import {
-  pickSpotlightPoint,
-  SPOTLIGHT_EMPTY_HINTS,
-  type SpotlightPresetId,
-} from "@/lib/mapSpotlightPresets";
 import type { MapPoint } from "@/types/mapPoint";
 import { attachGoogleStyleMapTypeBar } from "./mapDashboard/attachMapTypeBar";
 import {
   defaultCenter,
   defaultZoom,
-  MAP_FILTER_OVERLAY_RESERVE_X,
   MAP_FILTERS_HOST_TOP_REM,
   MAP_RESET_ZOOM_IN_THRESHOLD,
-  SPOTLIGHT_FOCUS_ZOOM,
   mapContainerStyle,
 } from "./mapDashboard/mapDashboardConstants";
-import { computeLocationPanelPanOffsetPx } from "./mapDashboard/mapPanelPan";
-import { isSameMapPoint } from "./mapDashboard/mapPointGeo";
-import {
-  cancelSpotlightZoomInterval,
-  startSpotlightSmoothZoom,
-} from "./mapDashboard/spotlightSmoothZoom";
 import { useInpostPointLookup } from "@/hooks/useInpostPointLookup";
 import { useMapFiltersQuery } from "@/hooks/useMapFiltersQuery";
 import { useMapMarkerCluster } from "@/hooks/useMapMarkerCluster";
 import { useMapPointDetail } from "@/hooks/useMapPointDetail";
 import { useMapPointsFetch } from "@/hooks/useMapPointsFetch";
+import { useMapSelectionCamera } from "@/hooks/useMapSelectionCamera";
+import { useMapSpotlight } from "@/hooks/useMapSpotlight";
+import { useSpotlightZoomRefs } from "@/hooks/useSpotlightZoomRefs";
 
 export type { MapPoint } from "@/types/mapPoint";
 
@@ -60,11 +49,8 @@ export default function MapDashboard() {
   const { inpostItem, inpostLoading, inpostError } = useInpostPointLookup(selected);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const spotlightZoomIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
-    null
-  );
-  /** When true, map ``idle`` must not schedule bbox ``/api/map-points`` fetches (stepped spotlight zoom). */
-  const spotlightZoomAnimatingRef = useRef(false);
+  const { spotlightZoomIntervalRef, spotlightZoomAnimatingRef } =
+    useSpotlightZoomRefs();
   const [mapDarkMode, setMapDarkMode] = useState(false);
   /** Camera passed into `GoogleMap` when basemap remounts (colorScheme only applies at init). */
   const [mapBootCenter, setMapBootCenter] = useState(defaultCenter);
@@ -74,13 +60,6 @@ export default function MapDashboard() {
   const locationPanelRef = useRef<HTMLDivElement | null>(null);
   const mapPanDxRef = useRef(0);
   const prevSelectedRef = useRef<MapPoint | null>(null);
-  const [activeSpotlight, setActiveSpotlight] = useState<SpotlightPresetId | null>(
-    null
-  );
-  const [spotlightToast, setSpotlightToast] = useState<string | null>(null);
-  const spotlightToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
   /** First stable camera after each map mount (initial view for that instance). */
   const mapCameraBaselineRef = useRef<{
     lat: number;
@@ -101,18 +80,6 @@ export default function MapDashboard() {
     googleMapsApiKey: apiKey,
     version: "weekly",
   });
-
-  useEffect(() => {
-    return () => {
-      if (spotlightToastTimerRef.current != null) {
-        clearTimeout(spotlightToastTimerRef.current);
-      }
-      cancelSpotlightZoomInterval(
-        spotlightZoomIntervalRef,
-        spotlightZoomAnimatingRef
-      );
-    };
-  }, []);
 
   useEffect(() => {
     if (!isLoaded || scriptError || typeof google === "undefined") {
@@ -142,153 +109,37 @@ export default function MapDashboard() {
     flushMapPointsAfterSpotlightZoom,
   } = useMapPointsFetch(map, mapPointsQueryString, spotlightZoomAnimatingRef);
 
-  const showSpotlightToast = useCallback((message: string) => {
-    setSpotlightToast(message);
-    if (spotlightToastTimerRef.current != null) {
-      clearTimeout(spotlightToastTimerRef.current);
-    }
-    spotlightToastTimerRef.current = setTimeout(() => {
-      setSpotlightToast(null);
-      spotlightToastTimerRef.current = null;
-    }, 3800);
-  }, []);
+  const {
+    activeSpotlight,
+    spotlightToast,
+    handleSpotlightSelect,
+    clearSpotlight,
+    cancelSpotlightZoom,
+  } = useMapSpotlight({
+    points,
+    setSelected,
+    spotlightZoomIntervalRef,
+    spotlightZoomAnimatingRef,
+  });
 
-  const handleSpotlightSelect = useCallback(
-    (id: SpotlightPresetId) => {
-      const pool = points ?? [];
-      if (activeSpotlight === id) {
-        cancelSpotlightZoomInterval(
-          spotlightZoomIntervalRef,
-          spotlightZoomAnimatingRef
-        );
-        setActiveSpotlight(null);
-        setSelected(null);
-        return;
-      }
-      const picked = pickSpotlightPoint(pool, id);
-      if (!picked) {
-        cancelSpotlightZoomInterval(
-          spotlightZoomIntervalRef,
-          spotlightZoomAnimatingRef
-        );
-        setActiveSpotlight(null);
-        showSpotlightToast(SPOTLIGHT_EMPTY_HINTS[id]);
-        return;
-      }
-      cancelSpotlightZoomInterval(
-        spotlightZoomIntervalRef,
-        spotlightZoomAnimatingRef
-      );
-      setActiveSpotlight(id);
-      setSelected(picked);
-    },
-    [points, activeSpotlight, showSpotlightToast]
-  );
+  useMapSelectionCamera({
+    map,
+    mapRef,
+    isLoaded,
+    selected,
+    activeSpotlight,
+    locationPanelRef,
+    mapPanDxRef,
+    prevSelectedRef,
+    spotlightZoomIntervalRef,
+    spotlightZoomAnimatingRef,
+    flushMapPointsAfterSpotlightZoom,
+  });
 
-  useLayoutEffect(() => {
-    if (!map || !isLoaded || typeof google === "undefined") {
-      cancelSpotlightZoomInterval(
-        spotlightZoomIntervalRef,
-        spotlightZoomAnimatingRef
-      );
-      return;
-    }
-    mapRef.current = map;
-    const prev = prevSelectedRef.current;
-    const cur = selected;
-
-    if (!cur) {
-      cancelSpotlightZoomInterval(
-        spotlightZoomIntervalRef,
-        spotlightZoomAnimatingRef
-      );
-    }
-
-    if (cur) {
-      const pinChanged = !prev || !isSameMapPoint(prev, cur);
-      map.panTo({ lat: cur.latitude, lng: cur.longitude });
-      const applyPanelAwareCenter = () => {
-        const m = mapRef.current;
-        if (!m) {
-          return;
-        }
-        const panelEl = locationPanelRef.current;
-        const mapDiv = m.getDiv();
-        const panelW =
-          panelEl?.getBoundingClientRect().width ??
-          panelEl?.offsetWidth ??
-          448;
-        const mapW = mapDiv.clientWidth ?? 0;
-        const dx = computeLocationPanelPanOffsetPx({
-          mapWidthPx: mapW,
-          panelWidthPx: panelW,
-          filterOverlayReserveX: MAP_FILTER_OVERLAY_RESERVE_X,
-        });
-        if (dx === 0) {
-          mapPanDxRef.current = 0;
-          return;
-        }
-        m.panBy(dx, 0);
-        mapPanDxRef.current = dx;
-      };
-
-      const z = map.getZoom() ?? 0;
-      const willSmoothSpotlightZoom =
-        pinChanged &&
-        z < SPOTLIGHT_FOCUS_ZOOM &&
-        activeSpotlight != null;
-
-      if (willSmoothSpotlightZoom) {
-        startSpotlightSmoothZoom(
-          mapRef,
-          spotlightZoomIntervalRef,
-          SPOTLIGHT_FOCUS_ZOOM,
-          spotlightZoomAnimatingRef,
-          () => {
-            flushMapPointsAfterSpotlightZoom();
-            requestAnimationFrame(() => {
-              requestAnimationFrame(() => {
-                applyPanelAwareCenter();
-              });
-            });
-          }
-        );
-      } else if (
-        pinChanged &&
-        z < SPOTLIGHT_FOCUS_ZOOM &&
-        activeSpotlight == null &&
-        z < 14
-      ) {
-        map.setZoom(14);
-      }
-
-      if (!willSmoothSpotlightZoom) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            applyPanelAwareCenter();
-          });
-        });
-      }
-    }
-
-    if (!cur && prev && mapPanDxRef.current !== 0) {
-      map.panBy(-mapPanDxRef.current, 0);
-      mapPanDxRef.current = 0;
-    }
-
-    prevSelectedRef.current = cur;
-
-    return () => {
-      cancelSpotlightZoomInterval(
-        spotlightZoomIntervalRef,
-        spotlightZoomAnimatingRef
-      );
-      if (map && mapPanDxRef.current !== 0) {
-        map.panBy(-mapPanDxRef.current, 0);
-        mapPanDxRef.current = 0;
-      }
-    };
-  }, [map, isLoaded, selected, activeSpotlight, flushMapPointsAfterSpotlightZoom]);
+  const dismissSelection = useCallback(() => {
+    setSelected(null);
+    clearSpotlight();
+  }, [clearSpotlight]);
 
   useEffect(() => {
     if (!selected) {
@@ -296,13 +147,12 @@ export default function MapDashboard() {
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setSelected(null);
-        setActiveSpotlight(null);
+        dismissSelection();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected]);
+  }, [selected, dismissSelection]);
 
   const onMapLoad = useCallback((m: google.maps.Map) => {
     mapTypeBarCleanupRef.current?.();
@@ -314,15 +164,12 @@ export default function MapDashboard() {
 
   const onMapUnmount = useCallback((m: google.maps.Map) => {
     void m;
-    cancelSpotlightZoomInterval(
-      spotlightZoomIntervalRef,
-      spotlightZoomAnimatingRef
-    );
+    cancelSpotlightZoom();
     mapRef.current = null;
     mapTypeBarCleanupRef.current?.();
     mapTypeBarCleanupRef.current = null;
     setMap(null);
-  }, []);
+  }, [cancelSpotlightZoom]);
 
   const snapshotMapCameraForRemount = useCallback(() => {
     if (!map) {
@@ -347,12 +194,14 @@ export default function MapDashboard() {
     if (!b) {
       return;
     }
+    cancelSpotlightZoom();
+    // Baseline restore sets center directly; do not run panel-undo panBy on deselect.
+    mapPanDxRef.current = 0;
     beginMapPointsRefresh("reset_map_view");
     map.panTo({ lat: b.lat, lng: b.lng });
     map.setZoom(b.zoom);
-    setActiveSpotlight(null);
-    setSelected(null);
-  }, [map, beginMapPointsRefresh]);
+    dismissSelection();
+  }, [map, beginMapPointsRefresh, dismissSelection, cancelSpotlightZoom]);
 
   useEffect(() => {
     if (!map) {
@@ -399,7 +248,7 @@ export default function MapDashboard() {
     markersData,
     selected,
     setSelected,
-    setActiveSpotlight,
+    setActiveSpotlight: clearSpotlight,
   });
 
   if (!apiKey) {
@@ -544,10 +393,7 @@ export default function MapDashboard() {
             type="button"
             aria-label="Close location details"
             className="fixed inset-0 z-[25] bg-black/45 md:hidden"
-            onClick={() => {
-              setSelected(null);
-              setActiveSpotlight(null);
-            }}
+            onClick={dismissSelection}
           />
           <LocationDetailPanel
             ref={locationPanelRef}
@@ -556,10 +402,7 @@ export default function MapDashboard() {
             inpostItem={inpostItem}
             inpostLoading={inpostLoading}
             inpostError={inpostError}
-            onClose={() => {
-              setSelected(null);
-              setActiveSpotlight(null);
-            }}
+            onClose={dismissSelection}
           />
         </>
       )}
@@ -627,9 +470,7 @@ export default function MapDashboard() {
         )}
         <MapSpotlightBar
           active={activeSpotlight}
-          onSelect={(id) => {
-            handleSpotlightSelect(id);
-          }}
+          onSelect={handleSpotlightSelect}
           poolEmpty={points === null || points.length === 0}
         />
       </div>
