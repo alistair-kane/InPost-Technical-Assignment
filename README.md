@@ -18,9 +18,9 @@ The combination of this data enables
 
 Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 
-**Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `**GET /points`** (bbox + query filters), `**GET /points/{id}`** (detail including `**google_reviews`**), `**GET /map-filters-meta`**.
+**Architecture:** The **Next.js** app (`apps/web`) renders the Google Javascript map. **FastAPI** (`apps/api`) serves querys to MongoDB with `GET /points`** (bbox + query filters), `GET /points/{id}` (detail including `google_reviews`), `GET /map-filters-meta`.
 
-**Data pipeline:** `**scripts/fetch_place_ids.py`** walks the **InPost global points API**, skips rows that already have `**google_place_id`**, queries Places Nearby Search (legacy) around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, `**google_reviews`**, distance, and validation fields.
+**Data pipeline:** `scripts/fetch_place_ids.py` walks the **InPost global points API**, skips rows that already have `google_place_id`, queries Places Nearby Search (legacy) around each locker for names containing inpost, picks the nearest candidate, then fetches Place Details to persist ratings, `**google_reviews`, distance, and validation fields.
 
 ## Technologies
 
@@ -44,7 +44,6 @@ Live deployment: **[https://inpostologia.pl](https://inpostologia.pl)**.
 ### Ingest & data
 
 ![Python ingest](https://img.shields.io/badge/Python-3.12%20(API)%20%7C%203.10%2B%20(scripts)-3776AB?style=flat-square&logo=python&logoColor=white)
-
 ![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?style=flat-square&logo=mongodb&logoColor=white)
 
 ### Ops
@@ -128,7 +127,7 @@ App: **http://localhost:3000**
 
 ## AI usage
 
-I used Cursor extensively in the development of all aspects of this project. My typical pattern of use was first to define a plan and refine it until I was satisfied with the implementation specification. I then check the output, test and refine further if necessary. 
+I used Cursor (auto model) extensively in the development of this project. My typical pattern of use was first to stipulate a feature plan and refine it until I was satisfied with the implementation specification. I then check the output, test and refine further if necessary.
 
 ## Anything else?
 
