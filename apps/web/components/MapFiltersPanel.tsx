@@ -484,7 +484,7 @@ export function MapFiltersPanel({
               <button
                 ref={proximityHelpBtnRef}
                 type="button"
-                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/20 bg-neutral-800/80 text-[11px] font-semibold leading-none text-neutral-400 transition hover:border-amber-500/40 hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 normal-case"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-neutral-800/80 text-[15px] font-semibold leading-none text-neutral-400 transition hover:border-amber-500/40 hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 normal-case"
                 aria-label="Google Maps Proximity help"
                 aria-expanded={proximityHelpOpen}
                 aria-controls="proximity-help-popover"

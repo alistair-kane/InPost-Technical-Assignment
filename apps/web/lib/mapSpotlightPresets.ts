@@ -1,4 +1,4 @@
-import type { MapPoint } from "@/types/mapPoint";
+import type { GoogleReviewSnippet, MapPoint } from "@/types/mapPoint";
 
 export type SpotlightPresetId =
   | "longest_review"
@@ -49,6 +49,14 @@ export const SPOTLIGHT_ICON_SRC: Record<SpotlightPresetId, string> = {
   newest_review: "/spotlight/newest-review.svg",
   oldest_review: "/spotlight/oldest-review.svg",
 };
+
+/** Spotlights that highlight a single review in the location detail panel. */
+export const SPOTLIGHT_REVIEW_FOCUS_PRESETS: ReadonlySet<SpotlightPresetId> =
+  new Set(["longest_review", "newest_review", "oldest_review"]);
+
+export function spotlightFocusesReview(preset: SpotlightPresetId): boolean {
+  return SPOTLIGHT_REVIEW_FOCUS_PRESETS.has(preset);
+}
 
 export const SPOTLIGHT_EMPTY_HINTS: Record<SpotlightPresetId, string> = {
   longest_review: "No review text in the current results.",
@@ -307,6 +315,106 @@ export function pickSpotlightPoint(
         }
       }
       return bestT < Infinity ? best : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function reviewSnippetTextLen(r: GoogleReviewSnippet): number {
+  const raw = r.text_original ?? r.text;
+  if (typeof raw !== "string") {
+    return 0;
+  }
+  return raw.trim().length;
+}
+
+function reviewSnippetTimeUnix(r: GoogleReviewSnippet): number | null {
+  const t = r.time_unix;
+  if (typeof t === "number" && Number.isFinite(t)) {
+    return t;
+  }
+  return null;
+}
+
+/** Same ordering as ``LocationDetailPanel`` (newest first). */
+export function sortReviewsNewestFirst(
+  a: GoogleReviewSnippet,
+  b: GoogleReviewSnippet
+): number {
+  const ta = reviewSnippetTimeUnix(a);
+  const tb = reviewSnippetTimeUnix(b);
+  if (ta != null && tb != null) {
+    return tb - ta;
+  }
+  if (ta != null) {
+    return -1;
+  }
+  if (tb != null) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * Index into a newest-first review list for review-focused spotlights, or null when
+ * no matching review is visible.
+ */
+export function findSpotlightReviewIndex(
+  reviews: GoogleReviewSnippet[],
+  preset: SpotlightPresetId
+): number | null {
+  if (!spotlightFocusesReview(preset) || reviews.length === 0) {
+    return null;
+  }
+
+  const sorted = [...reviews].sort(sortReviewsNewestFirst);
+
+  switch (preset) {
+    case "longest_review": {
+      let bestIdx = -1;
+      let bestLen = -1;
+      for (let i = 0; i < sorted.length; i++) {
+        const len = reviewSnippetTextLen(sorted[i]);
+        if (len <= 0) {
+          continue;
+        }
+        if (len > bestLen) {
+          bestLen = len;
+          bestIdx = i;
+        }
+      }
+      return bestIdx >= 0 ? bestIdx : null;
+    }
+    case "newest_review": {
+      let bestIdx = -1;
+      let bestT = -Infinity;
+      for (let i = 0; i < sorted.length; i++) {
+        const t = reviewSnippetTimeUnix(sorted[i]);
+        if (t == null) {
+          continue;
+        }
+        if (t > bestT) {
+          bestT = t;
+          bestIdx = i;
+        }
+      }
+      return bestIdx >= 0 ? bestIdx : null;
+    }
+    case "oldest_review": {
+      let bestIdx = -1;
+      let bestT = Infinity;
+      for (let i = 0; i < sorted.length; i++) {
+        const t = reviewSnippetTimeUnix(sorted[i]);
+        if (t == null) {
+          continue;
+        }
+        if (t < bestT) {
+          bestT = t;
+          bestIdx = i;
+        }
+      }
+      return bestIdx >= 0 ? bestIdx : null;
     }
     default:
       return null;

@@ -3,6 +3,11 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 import { mapMapPointDetailUrl } from "@/components/mapDashboard/mapApiUrls";
+import {
+  areGoogleReviewFiltersActive,
+  filterGoogleReviewsForMapFilters,
+  type MapFiltersForm,
+} from "@/components/mapFiltersQuery";
 import { clientRateLimitRule } from "@/lib/rateLimitConfig";
 import { RateLimitError, rateLimitedFetch } from "@/lib/clientRateLimit";
 import type {
@@ -11,9 +16,19 @@ import type {
   MapPointDetailOverlay,
 } from "@/types/mapPoint";
 
-export function useMapPointDetail(selected: MapPoint | null): {
+export type DetailGoogleReviewCounts = {
+  filtersActive: boolean;
+  total: number;
+  visible: number;
+};
+
+export function useMapPointDetail(
+  selected: MapPoint | null,
+  queryFilterForm: MapFiltersForm
+): {
   detailPoint: MapPoint | null;
   detailReviewsLoading: boolean;
+  detailGoogleReviewCounts: DetailGoogleReviewCounts;
 } {
   const [detailReviews, setDetailReviews] = useState<GoogleReviewSnippet[] | null>(
     null
@@ -101,6 +116,19 @@ export function useMapPointDetail(selected: MapPoint | null): {
     return () => ac.abort();
   }, [selected]);
 
+  const detailGoogleReviewCounts = useMemo((): DetailGoogleReviewCounts => {
+    const filtersActive = areGoogleReviewFiltersActive(queryFilterForm);
+    if (detailReviewsLoading || detailReviews === null) {
+      return { filtersActive, total: 0, visible: 0 };
+    }
+    const total = detailReviews.length;
+    const visible = filterGoogleReviewsForMapFilters(
+      detailReviews,
+      queryFilterForm
+    ).length;
+    return { filtersActive, total, visible };
+  }, [detailReviews, detailReviewsLoading, queryFilterForm]);
+
   const detailPoint = useMemo((): MapPoint | null => {
     if (!selected) {
       return null;
@@ -112,8 +140,18 @@ export function useMapPointDetail(selected: MapPoint | null): {
     if (detailReviewsLoading) {
       return { ...merged, google_reviews: undefined };
     }
-    return { ...merged, google_reviews: detailReviews ?? [] };
-  }, [selected, detailOverlay, detailReviews, detailReviewsLoading]);
+    const raw = detailReviews ?? [];
+    return {
+      ...merged,
+      google_reviews: filterGoogleReviewsForMapFilters(raw, queryFilterForm),
+    };
+  }, [
+    selected,
+    detailOverlay,
+    detailReviews,
+    detailReviewsLoading,
+    queryFilterForm,
+  ]);
 
-  return { detailPoint, detailReviewsLoading };
+  return { detailPoint, detailReviewsLoading, detailGoogleReviewCounts };
 }

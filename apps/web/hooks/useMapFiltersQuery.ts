@@ -20,6 +20,8 @@ const FILTER_DEBOUNCE_MS = 260;
 
 export function useMapFiltersQuery(): {
   filterForm: MapFiltersForm;
+  /** Debounced form used for map API queries and detail-panel review filtering. */
+  queryFilterForm: MapFiltersForm;
   applyFilterPatch: (patch: Partial<MapFiltersForm>) => void;
   partnerOptions: number[];
   selectedPartners: Set<number>;
@@ -151,6 +153,7 @@ export function useMapFiltersQuery(): {
 
   return {
     filterForm,
+    queryFilterForm,
     applyFilterPatch,
     partnerOptions,
     selectedPartners,

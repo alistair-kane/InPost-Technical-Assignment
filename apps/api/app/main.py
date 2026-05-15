@@ -185,7 +185,7 @@ def build_points_mongo_filter(
     rating_bounds = min_rating is not None or max_rating is not None
     partner_filter = bool(partner_ids)
     review_time_bounds = (
-        min_review_time is not None and max_review_time is not None
+        min_review_time is not None or max_review_time is not None
     )
     inpost_status_filter = bool(inpost_status_buckets)
     distance_cap = max_distance_to_google_place_m is not None
@@ -217,15 +217,31 @@ def build_points_mongo_filter(
         parts.append({"partner_id": {"$in": partner_ids}})
 
     if review_time_bounds:
-        assert min_review_time is not None and max_review_time is not None
-        parts.append(
-            {
-                "$and": [
-                    {"google_reviews_time_unix_max": {"$gte": min_review_time}},
-                    {"google_reviews_time_unix_min": {"$lte": max_review_time}},
-                ]
-            }
-        )
+        if min_review_time is not None and max_review_time is not None:
+            parts.append(
+                {
+                    "$and": [
+                        {
+                            "google_reviews_time_unix_max": {
+                                "$gte": min_review_time
+                            }
+                        },
+                        {
+                            "google_reviews_time_unix_min": {
+                                "$lte": max_review_time
+                            }
+                        },
+                    ]
+                }
+            )
+        elif min_review_time is not None:
+            parts.append(
+                {"google_reviews_time_unix_max": {"$gte": min_review_time}}
+            )
+        elif max_review_time is not None:
+            parts.append(
+                {"google_reviews_time_unix_min": {"$lte": max_review_time}}
+            )
 
     if inpost_status_filter and inpost_status_buckets is not None:
         parts.append(_inpost_status_mongo_filter(inpost_status_buckets))
@@ -447,13 +463,6 @@ def _rating_review_partner_validation(
             "min_rating must be less than or equal to max_rating",
         )
 
-    rt_min = min_review_time is not None
-    rt_max = max_review_time is not None
-    if rt_min != rt_max:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "min_review_time and max_review_time must both be set or both omitted",
-        )
     if (
         min_review_time is not None
         and max_review_time is not None

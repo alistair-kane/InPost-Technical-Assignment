@@ -1,7 +1,7 @@
 export const mapContainerStyle = { width: "100%", height: "100%" };
 
 export const defaultCenter = { lat: 52.1, lng: 19.3 };
-export const defaultZoom = 6.5;
+export const defaultZoom = 6;
 
 /** Min zoom levels above baseline before showing reset (Google Maps zoom increases when zooming in). */
 export const MAP_RESET_ZOOM_IN_THRESHOLD = 2;

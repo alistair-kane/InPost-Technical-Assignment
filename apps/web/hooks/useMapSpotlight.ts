@@ -1,8 +1,9 @@
 "use client";
 
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { MapPointsRefreshReason } from "@/components/mapDashboard/mapPointsRefresh";
 import { cancelSpotlightZoomInterval } from "@/components/mapDashboard/spotlightSmoothZoom";
 import {
   pickSpotlightPoint,
@@ -15,30 +16,50 @@ const SPOTLIGHT_TOAST_MS = 3800;
 
 type UseMapSpotlightParams = {
   points: MapPoint[] | null;
+  /** Debounced query used by bbox fetch (must match baseline before spotlight pick). */
+  mapPointsQueryString: string;
+  baselineMapPointsQueryString: string;
+  resetFiltersToEmpty: () => void;
+  beginMapPointsRefresh: (reason: MapPointsRefreshReason) => void;
+  /** Run bbox fetch after refresh (needed when the filter query string does not change). */
+  requestMapPointsFetch: () => void;
   setSelected: Dispatch<SetStateAction<MapPoint | null>>;
-  spotlightZoomIntervalRef: MutableRefObject<ReturnType<typeof setInterval> | null>;
-  spotlightZoomAnimatingRef: MutableRefObject<boolean>;
+  spotlightZoomIntervalRef: RefObject<ReturnType<typeof setInterval> | null>;
+  spotlightZoomAnimatingRef: RefObject<boolean>;
 };
 
 export function useMapSpotlight({
   points,
+  mapPointsQueryString,
+  baselineMapPointsQueryString,
+  resetFiltersToEmpty,
+  beginMapPointsRefresh,
+  requestMapPointsFetch,
   setSelected,
   spotlightZoomIntervalRef,
   spotlightZoomAnimatingRef,
 }: UseMapSpotlightParams): {
   activeSpotlight: SpotlightPresetId | null;
+  spotlightNavigating: boolean;
   spotlightToast: string | null;
   handleSpotlightSelect: (id: SpotlightPresetId) => void;
   clearSpotlight: () => void;
   cancelSpotlightZoom: () => void;
+  onSpotlightNavigationEnd: () => void;
 } {
   const [activeSpotlight, setActiveSpotlight] = useState<SpotlightPresetId | null>(
     null
   );
   const [spotlightToast, setSpotlightToast] = useState<string | null>(null);
+  const [spotlightNavigating, setSpotlightNavigating] = useState(false);
   const spotlightToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  const pendingSpotlightRef = useRef<SpotlightPresetId | null>(null);
+
+  const onSpotlightNavigationEnd = useCallback(() => {
+    setSpotlightNavigating(false);
+  }, []);
 
   const cancelSpotlightZoom = useCallback(() => {
     cancelSpotlightZoomInterval(
@@ -48,8 +69,10 @@ export function useMapSpotlight({
   }, [spotlightZoomIntervalRef, spotlightZoomAnimatingRef]);
 
   const clearSpotlight = useCallback(() => {
+    pendingSpotlightRef.current = null;
     cancelSpotlightZoom();
     setActiveSpotlight(null);
+    setSpotlightNavigating(false);
   }, [cancelSpotlightZoom]);
 
   const showSpotlightToast = useCallback((message: string) => {
@@ -63,34 +86,73 @@ export function useMapSpotlight({
     }, SPOTLIGHT_TOAST_MS);
   }, []);
 
-  const handleSpotlightSelect = useCallback(
-    (id: SpotlightPresetId) => {
-      const pool = points ?? [];
-      if (activeSpotlight === id) {
-        cancelSpotlightZoom();
-        setActiveSpotlight(null);
-        setSelected(null);
-        return;
-      }
+  const completePendingSpotlight = useCallback(
+    (id: SpotlightPresetId, pool: MapPoint[]) => {
       const picked = pickSpotlightPoint(pool, id);
       if (!picked) {
         cancelSpotlightZoom();
         setActiveSpotlight(null);
+        setSpotlightNavigating(false);
         showSpotlightToast(SPOTLIGHT_EMPTY_HINTS[id]);
         return;
       }
       cancelSpotlightZoom();
+      setSpotlightNavigating(true);
       setActiveSpotlight(id);
       setSelected(picked);
     },
+    [cancelSpotlightZoom, setSelected, showSpotlightToast]
+  );
+
+  const handleSpotlightSelect = useCallback(
+    (id: SpotlightPresetId) => {
+      if (activeSpotlight === id) {
+        pendingSpotlightRef.current = null;
+        cancelSpotlightZoom();
+        setActiveSpotlight(null);
+        setSpotlightNavigating(false);
+        setSelected(null);
+        return;
+      }
+
+      resetFiltersToEmpty();
+      beginMapPointsRefresh("spotlight");
+      requestMapPointsFetch();
+      pendingSpotlightRef.current = id;
+      setActiveSpotlight(id);
+      setSpotlightNavigating(true);
+      cancelSpotlightZoom();
+      setSelected(null);
+    },
     [
-      points,
       activeSpotlight,
+      beginMapPointsRefresh,
       cancelSpotlightZoom,
+      requestMapPointsFetch,
+      resetFiltersToEmpty,
       setSelected,
-      showSpotlightToast,
     ]
   );
+
+  useEffect(() => {
+    const id = pendingSpotlightRef.current;
+    if (id == null) {
+      return;
+    }
+    if (mapPointsQueryString !== baselineMapPointsQueryString) {
+      return;
+    }
+    if (points == null) {
+      return;
+    }
+    pendingSpotlightRef.current = null;
+    completePendingSpotlight(id, points);
+  }, [
+    points,
+    mapPointsQueryString,
+    baselineMapPointsQueryString,
+    completePendingSpotlight,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -103,9 +165,11 @@ export function useMapSpotlight({
 
   return {
     activeSpotlight,
+    spotlightNavigating,
     spotlightToast,
     handleSpotlightSelect,
     clearSpotlight,
     cancelSpotlightZoom,
+    onSpotlightNavigationEnd,
   };
 }

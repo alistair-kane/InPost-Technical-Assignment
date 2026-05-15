@@ -28,6 +28,7 @@ type UseMapSelectionCameraParams = {
   spotlightZoomIntervalRef: RefObject<ReturnType<typeof setInterval> | null>;
   spotlightZoomAnimatingRef: RefObject<boolean>;
   flushMapPointsAfterSpotlightZoom: () => void;
+  onSpotlightNavigationEnd?: () => void;
 };
 
 /**
@@ -46,6 +47,7 @@ export function useMapSelectionCamera({
   spotlightZoomIntervalRef,
   spotlightZoomAnimatingRef,
   flushMapPointsAfterSpotlightZoom,
+  onSpotlightNavigationEnd,
 }: UseMapSelectionCameraParams): void {
   useLayoutEffect(() => {
     if (!map || !isLoaded || typeof google === "undefined") {
@@ -68,6 +70,9 @@ export function useMapSelectionCamera({
 
     if (cur) {
       const pinChanged = !prev || !isSameMapPoint(prev, cur);
+      if (!pinChanged && activeSpotlight != null) {
+        onSpotlightNavigationEnd?.();
+      }
       map.panTo({ lat: cur.latitude, lng: cur.longitude });
       const applyPanelAwareCenter = () => {
         const m = mapRef.current;
@@ -111,6 +116,7 @@ export function useMapSelectionCamera({
             requestAnimationFrame(() => {
               requestAnimationFrame(() => {
                 applyPanelAwareCenter();
+                onSpotlightNavigationEnd?.();
               });
             });
           }
@@ -128,6 +134,9 @@ export function useMapSelectionCamera({
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             applyPanelAwareCenter();
+            if (activeSpotlight != null && pinChanged) {
+              onSpotlightNavigationEnd?.();
+            }
           });
         });
       }
@@ -162,5 +171,6 @@ export function useMapSelectionCamera({
     spotlightZoomIntervalRef,
     spotlightZoomAnimatingRef,
     flushMapPointsAfterSpotlightZoom,
+    onSpotlightNavigationEnd,
   ]);
 }

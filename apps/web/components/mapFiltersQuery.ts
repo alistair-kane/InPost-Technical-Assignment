@@ -2,6 +2,7 @@ import {
   PACZKOPUNKT_PARTNER_IDS,
   PACZKOPUNKT_UI_PARTNER_ID,
 } from "@/lib/paczkopunktPartnerIds";
+import type { GoogleReviewSnippet } from "@/types/mapPoint";
 
 export { PACZKOPUNKT_PARTNER_IDS, PACZKOPUNKT_UI_PARTNER_ID };
 
@@ -23,12 +24,18 @@ export const DAY_SEC = 86_400;
 /** Mean Gregorian year in seconds (for 12y / 3y / 1y knots). */
 export const YEAR_SEC = 365.25 * DAY_SEC;
 
-/** Piecewise review-time knots: index 0 = oldest (12y), 6 = 1d (newest labeled). */
+/** Oldest knot index: no `min_review_time` (include reviews 12y+ / unbounded past). */
+export const REVIEW_TIME_OLDEST_KNOT_INDEX = 0;
+
+/** Piecewise review-time knots: index 0 = oldest (12y+), 6 = 1d (newest labeled). */
 export const REVIEW_TIME_MAX_KNOT_INDEX = 6;
+
+/** Label for the oldest knot (unbounded lookback on the past side). */
+export const REVIEW_TIME_OLDEST_KNOT_LABEL = "12y+";
 
 /** Short labels under the stepped slider (oldest → newest). */
 export const REVIEW_TIME_KNOT_LABELS: readonly string[] = [
-  "12y",
+  REVIEW_TIME_OLDEST_KNOT_LABEL,
   "3y",
   "1y",
   "90d",
@@ -121,16 +128,26 @@ export function reviewTimeKnotUnix(nowSec: number, knotIdx: number): number {
   return Math.floor(nowSec - reviewTimeKnotOffsetSec(knotIdx));
 }
 
+export type ReviewTimeUnixBounds = {
+  /** Omitted from API when null (`12y+` / oldest knot — no floor on review age). */
+  minUnix: number | null;
+  /** When `maxIdx === REVIEW_TIME_MAX_KNOT_INDEX`, `maxUnix` is `nowSec` (include up to present). */
+  maxUnix: number;
+};
+
 /**
- * Inclusive `[minUnix, maxUnix]` for Mongo `google_reviews.time_unix`.
- * When `maxIdx === REVIEW_TIME_MAX_KNOT_INDEX`, `maxUnix` is `nowSec` (include up to present).
+ * Inclusive `[minUnix, maxUnix]` for review-time filtering.
+ * `minIdx === REVIEW_TIME_OLDEST_KNOT_INDEX` → `minUnix: null` (12y+).
  */
 export function knotIndicesToUnixBounds(
   nowSec: number,
   minIdx: number,
   maxIdx: number
-): { minUnix: number; maxUnix: number } {
-  const minUnix = reviewTimeKnotUnix(nowSec, minIdx);
+): ReviewTimeUnixBounds {
+  const minUnix =
+    minIdx === REVIEW_TIME_OLDEST_KNOT_INDEX
+      ? null
+      : reviewTimeKnotUnix(nowSec, minIdx);
   const maxUnix =
     maxIdx === REVIEW_TIME_MAX_KNOT_INDEX
       ? nowSec
@@ -143,6 +160,70 @@ export function isDefaultReviewTimeRange(
   maxIdx: number
 ): boolean {
   return minIdx === 0 && maxIdx === REVIEW_TIME_MAX_KNOT_INDEX;
+}
+
+export function isDefaultRatingRange(
+  minRating: number,
+  maxRating: number
+): boolean {
+  return minRating <= RATING_SLIDER_MIN && maxRating >= RATING_SLIDER_MAX;
+}
+
+/** Rating and review-time filters that apply per review in the detail panel. */
+export function areGoogleReviewFiltersActive(form: MapFiltersForm): boolean {
+  return (
+    !isDefaultRatingRange(form.minRating, form.maxRating) ||
+    !isDefaultReviewTimeRange(form.reviewTimeMinIdx, form.reviewTimeMaxIdx)
+  );
+}
+
+function reviewMatchesGoogleFilters(
+  review: GoogleReviewSnippet,
+  form: MapFiltersForm,
+  nowSec: number
+): boolean {
+  if (!isDefaultRatingRange(form.minRating, form.maxRating)) {
+    const r = review.rating;
+    if (typeof r !== "number" || !Number.isFinite(r)) {
+      return false;
+    }
+    if (form.minRating > RATING_SLIDER_MIN && r < form.minRating) {
+      return false;
+    }
+    if (form.maxRating < RATING_SLIDER_MAX && r > form.maxRating) {
+      return false;
+    }
+  }
+  if (!isDefaultReviewTimeRange(form.reviewTimeMinIdx, form.reviewTimeMaxIdx)) {
+    const t = review.time_unix;
+    if (typeof t !== "number" || !Number.isFinite(t)) {
+      return false;
+    }
+    const { minUnix, maxUnix } = knotIndicesToUnixBounds(
+      nowSec,
+      form.reviewTimeMinIdx,
+      form.reviewTimeMaxIdx
+    );
+    if (minUnix != null && t < minUnix) {
+      return false;
+    }
+    if (t > maxUnix) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Client-side filter for detail-panel review list (matches map query rating/time bounds). */
+export function filterGoogleReviewsForMapFilters(
+  reviews: GoogleReviewSnippet[],
+  form: MapFiltersForm,
+  nowSec = Math.floor(Date.now() / 1000)
+): GoogleReviewSnippet[] {
+  if (!areGoogleReviewFiltersActive(form)) {
+    return reviews;
+  }
+  return reviews.filter((r) => reviewMatchesGoogleFilters(r, form, nowSec));
 }
 
 function isSameLocalCalendarDay(a: Date, b: Date): boolean {
@@ -161,7 +242,29 @@ function formatReviewSummaryDate(d: Date, now: Date): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(d);
 }
 
-/** Human-readable range for the filter summary line. */
+/** Label for the newer (left / maxIdx) end of the review-time window. */
+function formatReviewTimeNewerBoundLabel(
+  maxUnix: number,
+  now: Date
+): string {
+  return formatReviewSummaryDate(new Date(maxUnix * 1000), now);
+}
+
+/** Label for the older (right / minIdx) end of the review-time window. */
+function formatReviewTimeOlderBoundLabel(
+  minUnix: number | null,
+  now: Date
+): string {
+  if (minUnix == null) {
+    return REVIEW_TIME_OLDEST_KNOT_LABEL;
+  }
+  return formatReviewSummaryDate(new Date(minUnix * 1000), now);
+}
+
+/**
+ * Human-readable range for the filter summary (newer → older, same order as the
+ * slider labels: 1d … 12y+ left to right).
+ */
 export function formatReviewTimeFilterSummary(form: MapFiltersForm): string {
   if (isDefaultReviewTimeRange(form.reviewTimeMinIdx, form.reviewTimeMaxIdx)) {
     return "Any review time";
@@ -173,9 +276,9 @@ export function formatReviewTimeFilterSummary(form: MapFiltersForm): string {
     form.reviewTimeMinIdx,
     form.reviewTimeMaxIdx
   );
-  const minLabel = formatReviewSummaryDate(new Date(minUnix * 1000), now);
-  const maxLabel = formatReviewSummaryDate(new Date(maxUnix * 1000), now);
-  return `${minLabel} – ${maxLabel}`;
+  const newerLabel = formatReviewTimeNewerBoundLabel(maxUnix, now);
+  const olderLabel = formatReviewTimeOlderBoundLabel(minUnix, now);
+  return `${newerLabel} – ${olderLabel}`;
 }
 
 function clampGoogleMapsProximityRadiusM(n: unknown): number {
@@ -336,6 +439,15 @@ export function areMapFiltersActive(
   return false;
 }
 
+/** Query string for default filters with no partner subset (spotlight baseline). */
+export function baselineMapPointsQueryString(partnerOptions: number[]): string {
+  return buildMapPointsQueryString(
+    emptyMapFiltersForm(),
+    partnerOptions,
+    new Set()
+  );
+}
+
 export function buildMapPointsQueryString(
   form: MapFiltersForm,
   partnerOptions: number[],
@@ -366,7 +478,9 @@ export function buildMapPointsQueryString(
       form.reviewTimeMinIdx,
       form.reviewTimeMaxIdx
     );
-    sp.set("min_review_time", String(minUnix));
+    if (minUnix != null) {
+      sp.set("min_review_time", String(minUnix));
+    }
     sp.set("max_review_time", String(maxUnix));
   }
 

@@ -1,9 +1,16 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useEffect, useMemo, useRef } from "react";
 
 import { markerSvgSrc } from "@/lib/markerSvgSrc";
 import { inpostDetailStatusDotClassName } from "@/components/inpostStatusDot";
+import type { DetailGoogleReviewCounts } from "@/hooks/useMapPointDetail";
+import {
+  findSpotlightReviewIndex,
+  sortReviewsNewestFirst,
+  spotlightFocusesReview,
+  type SpotlightPresetId,
+} from "@/lib/mapSpotlightPresets";
 import type { GoogleReviewSnippet, MapPoint } from "@/types/mapPoint";
 
 export type InpostPointItem = Record<string, unknown> | null;
@@ -12,6 +19,9 @@ type LocationDetailPanelProps = {
   point: MapPoint;
   /** When true, Google reviews list shows a loading state (lazy fetch). */
   reviewsLoading?: boolean;
+  googleReviewCounts?: DetailGoogleReviewCounts;
+  /** When set, scrolls to and highlights the review tied to this spotlight preset. */
+  activeSpotlight?: SpotlightPresetId | null;
   inpostItem: InpostPointItem;
   inpostLoading: boolean;
   inpostError: string | null;
@@ -45,6 +55,27 @@ function reviewBody(r: GoogleReviewSnippet): string | null {
   return str(r.text_original) ?? str(r.text);
 }
 
+/** Align review top to scrollport top when there is room; otherwise center (near list end). */
+function scrollSpotlightReviewIntoView(
+  scrollContainer: HTMLElement,
+  reviewEl: HTMLElement
+): void {
+  const containerTop = scrollContainer.getBoundingClientRect().top;
+  const reviewTop = reviewEl.getBoundingClientRect().top;
+  const desiredScrollTop = scrollContainer.scrollTop + (reviewTop - containerTop);
+  const maxScrollTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+
+  if (desiredScrollTop <= maxScrollTop + 1) {
+    scrollContainer.scrollTo({
+      top: Math.max(0, desiredScrollTop),
+      behavior: "smooth",
+    });
+    return;
+  }
+
+  reviewEl.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 function formatReviewRating(rating: unknown): string | null {
   if (typeof rating !== "number" || !Number.isFinite(rating) || rating <= 0) {
     return null;
@@ -52,35 +83,20 @@ function formatReviewRating(rating: unknown): string | null {
   return rating === Math.round(rating) ? String(Math.round(rating)) : rating.toFixed(1);
 }
 
-function reviewTimeUnix(rev: GoogleReviewSnippet): number | null {
-  const t = rev.time_unix;
-  if (typeof t === "number" && Number.isFinite(t)) {
-    return t;
-  }
-  return null;
-}
-
-/** Newest first; reviews without `time_unix` follow (original order among those). */
-function sortReviewsNewestFirst(a: GoogleReviewSnippet, b: GoogleReviewSnippet): number {
-  const ta = reviewTimeUnix(a);
-  const tb = reviewTimeUnix(b);
-  if (ta != null && tb != null) {
-    return tb - ta;
-  }
-  if (ta != null) {
-    return -1;
-  }
-  if (tb != null) {
-    return 1;
-  }
-  return 0;
-}
-
 export const LocationDetailPanel = forwardRef<
   HTMLDivElement,
   LocationDetailPanelProps
 >(function LocationDetailPanel(
-  { point, reviewsLoading = false, inpostItem, inpostLoading, inpostError, onClose },
+  {
+    point,
+    reviewsLoading = false,
+    googleReviewCounts,
+    activeSpotlight = null,
+    inpostItem,
+    inpostLoading,
+    inpostError,
+    onClose,
+  },
   ref
 ) {
   const title = point.name ?? point.inpost_point_id ?? "Location";
@@ -99,10 +115,54 @@ export const LocationDetailPanel = forwardRef<
     ? "Loading…"
     : liveStatus ?? (inpostItem ? "Unknown" : "—");
 
-  const googleReviews = (point.google_reviews ?? [])
-    .map(asGoogleReview)
-    .filter((x): x is GoogleReviewSnippet => x !== null)
-    .sort(sortReviewsNewestFirst);
+  const reviewsScrollRef = useRef<HTMLDivElement | null>(null);
+  const reviewItemRefs = useRef<(HTMLLIElement | null)[]>([]);
+
+  const googleReviews = useMemo(
+    () =>
+      (point.google_reviews ?? [])
+        .map(asGoogleReview)
+        .filter((x): x is GoogleReviewSnippet => x !== null)
+        .sort(sortReviewsNewestFirst),
+    [point.google_reviews]
+  );
+
+  const spotlightReviewIndex = useMemo(() => {
+    if (
+      reviewsLoading ||
+      activeSpotlight == null ||
+      !spotlightFocusesReview(activeSpotlight)
+    ) {
+      return null;
+    }
+    return findSpotlightReviewIndex(googleReviews, activeSpotlight);
+  }, [activeSpotlight, googleReviews, reviewsLoading]);
+
+  useEffect(() => {
+    reviewItemRefs.current.length = googleReviews.length;
+  }, [googleReviews.length, point.inpost_point_id, activeSpotlight]);
+
+  useEffect(() => {
+    if (spotlightReviewIndex == null || reviewsLoading) {
+      return;
+    }
+    const scrollToSpotlightReview = () => {
+      const reviewEl = reviewItemRefs.current[spotlightReviewIndex];
+      const scrollRoot = reviewsScrollRef.current;
+      if (!reviewEl || !scrollRoot) {
+        return;
+      }
+      scrollSpotlightReviewIntoView(scrollRoot, reviewEl);
+    };
+    const frame = requestAnimationFrame(scrollToSpotlightReview);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    spotlightReviewIndex,
+    reviewsLoading,
+    googleReviews.length,
+    point.inpost_point_id,
+    activeSpotlight,
+  ]);
 
   return (
     <div
@@ -110,7 +170,7 @@ export const LocationDetailPanel = forwardRef<
       role="dialog"
       aria-modal="true"
       aria-labelledby="location-detail-title"
-      className="fixed bottom-0 left-0 top-[72px] z-30 flex w-full max-w-full flex-col border-r border-white/10 bg-neutral-950/98 text-neutral-100 shadow-2xl backdrop-blur-md md:max-w-md"
+      className="fixed bottom-0 left-0 top-[72px] z-30 flex w-full max-w-full flex-col border-r border-white/10 bg-neutral-950/98 text-neutral-100 shadow-2xl backdrop-blur-md md:max-w-xs"
     >
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <button
@@ -121,7 +181,10 @@ export const LocationDetailPanel = forwardRef<
         >
           ✕
         </button>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div
+          ref={reviewsScrollRef}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+        >
         <div className="relative h-[200px] max-h-[200px] w-full shrink-0 overflow-hidden bg-neutral-800">
           {inpostLoading && (
             <div className="absolute inset-0 animate-pulse bg-neutral-700/80" />
@@ -221,7 +284,7 @@ export const LocationDetailPanel = forwardRef<
               </div>
               {point.distance_to_google_place_m != null && (
                 <div>
-                  <dt className="text-xs text-neutral-500">Google place Δ</dt>
+                  <dt className="text-xs text-neutral-500">Difference between Inpost API point and Google API point</dt>
                   <dd className="mt-0.5">
                     {Math.round(point.distance_to_google_place_m)} m
                   </dd>
@@ -249,19 +312,40 @@ export const LocationDetailPanel = forwardRef<
                 <p className="mt-2 text-sm text-neutral-500">Loading reviews…</p>
               ) : googleReviews.length === 0 ? (
                 <p className="mt-2 text-sm text-neutral-500">
-                  No review text stored for this point.
+                  {googleReviewCounts?.filtersActive &&
+                  (googleReviewCounts.total ?? 0) > 0
+                    ? "No reviews match the current map filters."
+                    : "No review text stored for this point."}
                 </p>
               ) : (
+                <>
+                  {googleReviewCounts?.filtersActive &&
+                    googleReviewCounts.total > googleReviews.length && (
+                      <p className="mt-2 text-xs text-neutral-500">
+                        Showing {googleReviews.length} of {googleReviewCounts.total}{" "}
+                        reviews (map filters applied).
+                      </p>
+                    )}
                 <ul className="mt-3 space-y-3">
                   {googleReviews.map((rev, i) => {
                     const author = str(rev.author_name) ?? "Anonymous";
                     const when = str(rev.relative_time_description);
                     const stars = formatReviewRating(rev.rating);
                     const body = reviewBody(rev);
+                    const isSpotlightReview =
+                      spotlightReviewIndex != null && i === spotlightReviewIndex;
                     return (
                       <li
                         key={`${author}-${when}-${i}`}
-                        className="rounded-md border border-white/10 bg-neutral-900/50 p-3"
+                        ref={(el) => {
+                          reviewItemRefs.current[i] = el;
+                        }}
+                        className={
+                          isSpotlightReview
+                            ? "rounded-md border-2 border-yellow-400 bg-neutral-900/70 p-3 ring-1 ring-yellow-400/50"
+                            : "rounded-md border border-white/10 bg-neutral-900/50 p-3"
+                        }
+                        aria-current={isSpotlightReview ? "true" : undefined}
                       >
                         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
                           <span className="font-medium text-neutral-200">{author}</span>
@@ -288,6 +372,7 @@ export const LocationDetailPanel = forwardRef<
                     );
                   })}
                 </ul>
+                </>
               )}
             </div>
           </section>

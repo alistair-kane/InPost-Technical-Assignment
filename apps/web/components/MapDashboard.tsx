@@ -24,6 +24,7 @@ import {
   mapContainerStyle,
 } from "./mapDashboard/mapDashboardConstants";
 import { useInpostPointLookup } from "@/hooks/useInpostPointLookup";
+import { baselineMapPointsQueryString } from "@/components/mapFiltersQuery";
 import { useMapFiltersQuery } from "@/hooks/useMapFiltersQuery";
 import { useMapMarkerCluster } from "@/hooks/useMapMarkerCluster";
 import { useMapPointDetail } from "@/hooks/useMapPointDetail";
@@ -43,9 +44,11 @@ export default function MapDashboard() {
     mapPointsQueryString,
     onPartnerToggle,
     resetFiltersToEmpty,
+    queryFilterForm,
   } = useMapFiltersQuery();
   const [selected, setSelected] = useState<MapPoint | null>(null);
-  const { detailPoint, detailReviewsLoading } = useMapPointDetail(selected);
+  const { detailPoint, detailReviewsLoading, detailGoogleReviewCounts } =
+    useMapPointDetail(selected, queryFilterForm);
   const { inpostItem, inpostLoading, inpostError } = useInpostPointLookup(selected);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -109,14 +112,26 @@ export default function MapDashboard() {
     flushMapPointsAfterSpotlightZoom,
   } = useMapPointsFetch(map, mapPointsQueryString, spotlightZoomAnimatingRef);
 
+  const baselineMapPointsQuery = useMemo(
+    () => baselineMapPointsQueryString(partnerOptions),
+    [partnerOptions]
+  );
+
   const {
     activeSpotlight,
+    spotlightNavigating,
     spotlightToast,
     handleSpotlightSelect,
     clearSpotlight,
     cancelSpotlightZoom,
+    onSpotlightNavigationEnd,
   } = useMapSpotlight({
     points,
+    mapPointsQueryString,
+    baselineMapPointsQueryString: baselineMapPointsQuery,
+    resetFiltersToEmpty,
+    beginMapPointsRefresh,
+    requestMapPointsFetch: flushMapPointsAfterSpotlightZoom,
     setSelected,
     spotlightZoomIntervalRef,
     spotlightZoomAnimatingRef,
@@ -134,6 +149,7 @@ export default function MapDashboard() {
     spotlightZoomIntervalRef,
     spotlightZoomAnimatingRef,
     flushMapPointsAfterSpotlightZoom,
+    onSpotlightNavigationEnd,
   });
 
   const dismissSelection = useCallback(() => {
@@ -399,6 +415,8 @@ export default function MapDashboard() {
             ref={locationPanelRef}
             point={detailPoint}
             reviewsLoading={detailReviewsLoading}
+            googleReviewCounts={detailGoogleReviewCounts}
+            activeSpotlight={activeSpotlight}
             inpostItem={inpostItem}
             inpostLoading={inpostLoading}
             inpostError={inpostError}
@@ -468,8 +486,18 @@ export default function MapDashboard() {
             Reset Map View
           </button>
         )}
+        {spotlightNavigating && (
+          <p
+            className="pointer-events-none rounded-md border border-amber-500/30 bg-neutral-950/90 px-3 py-1.5 text-center text-sm text-amber-100 shadow-lg backdrop-blur"
+            role="status"
+            aria-live="polite"
+          >
+            Moving to spotlight location…
+          </p>
+        )}
         <MapSpotlightBar
           active={activeSpotlight}
+          navigating={spotlightNavigating}
           onSelect={handleSpotlightSelect}
           poolEmpty={points === null || points.length === 0}
         />
